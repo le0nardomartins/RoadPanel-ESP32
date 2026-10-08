@@ -1,6 +1,6 @@
 .pio/build/esp32dev/lib45d/LovyanGFX/lgfx/v1/platforms/esp32/Bus_I2C.cpp.o: \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/platforms/esp32/Bus_I2C.cpp \
- C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/qio_qspi/include/sdkconfig.h \
+ C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/dio_qspi/include/sdkconfig.h \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/platforms/esp32/Bus_I2C.hpp \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/platforms/esp32/../../Bus.hpp \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/platforms/esp32/../../misc/enum.hpp \

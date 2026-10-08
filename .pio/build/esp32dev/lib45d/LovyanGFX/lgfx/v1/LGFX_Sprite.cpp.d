@@ -2,7 +2,7 @@
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/LGFX_Sprite.cpp \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/LGFX_Sprite.hpp \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/newlib/platform_include/assert.h \
- C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/qio_qspi/include/sdkconfig.h \
+ C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/dio_qspi/include/sdkconfig.h \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/LGFXBase.hpp \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/cores/esp32/Print.h \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/cores/esp32/WString.h \

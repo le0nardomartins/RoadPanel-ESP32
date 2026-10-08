@@ -1,6 +1,6 @@
 .pio/build/esp32dev/lib45d/LovyanGFX/lgfx/v1/platforms/esp32/Panel_CVBS.cpp.o: \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/platforms/esp32/Panel_CVBS.cpp \
- C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/qio_qspi/include/sdkconfig.h \
+ C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/dio_qspi/include/sdkconfig.h \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/freertos/include/freertos/FreeRTOS.h \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/freertos/include/esp_additions/freertos/FreeRTOSConfig.h \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_common/include/esp_compiler.h \

@@ -1,6 +1,6 @@
 .pio/build/esp32dev/lib45d/LovyanGFX/lgfx/v1/platforms/esp32/Bus_SPI.cpp.o: \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/platforms/esp32/Bus_SPI.cpp \
- C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/qio_qspi/include/sdkconfig.h \
+ C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/dio_qspi/include/sdkconfig.h \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/platforms/esp32/Bus_SPI.hpp \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_rom/include/esp32/rom/lldesc.h \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/driver/include/driver/spi_common_internal.h \

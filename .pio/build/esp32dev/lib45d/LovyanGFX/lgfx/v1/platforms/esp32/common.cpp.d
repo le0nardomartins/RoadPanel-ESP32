@@ -1,6 +1,6 @@
 .pio/build/esp32dev/lib45d/LovyanGFX/lgfx/v1/platforms/esp32/common.cpp.o: \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/platforms/esp32/common.cpp \
- C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/qio_qspi/include/sdkconfig.h \
+ C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/dio_qspi/include/sdkconfig.h \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/platforms/esp32/common.hpp \
  .pio/libdeps/esp32dev/LovyanGFX/src/lgfx/v1/platforms/esp32/../../misc/DataWrapper.hpp \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \

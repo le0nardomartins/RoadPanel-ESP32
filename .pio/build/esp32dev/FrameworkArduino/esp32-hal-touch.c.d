@@ -1,7 +1,7 @@
 .pio/build/esp32dev/FrameworkArduino/esp32-hal-touch.c.o: \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-touch.c \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/soc_caps.h \
- C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/qio_qspi/include/sdkconfig.h \
+ C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/dio_qspi/include/sdkconfig.h \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/driver/esp32/include/driver/touch_sensor.h \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/driver/include/driver/touch_sensor_common.h \
  C:/Users/leona/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_common/include/esp_err.h \
