@@ -28,7 +28,6 @@ struct VehicleData {
 
 // Comandos opcionais que a serial também aceita (não fazem parte do vehicle_info)
 struct PanelCommand {
-  int view = -1;              // 0 perseguição, 1 topo
   int source = -1;            // 0 simulação, 1 serial
   int planMode = -1;          // 0 caminho livre, 1 tabela do carro
 };

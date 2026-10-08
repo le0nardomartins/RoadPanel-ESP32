@@ -64,15 +64,12 @@ ParseResult parseSerialLine(const char *line, VehicleData &data, PanelCommand &c
   JsonObjectConst raw = doc.as<JsonObjectConst>();
   if (raw.isNull()) return ParseResult::Error;
 
-  // Comandos do painel: {"panel": {"view": "top"|"chase", "source": "sim"|"serial", "plan": "car"|"shortest"}}
+  // Comandos do painel: {"panel": {"source": "sim"|"serial", "plan": "car"|"shortest"}}
   JsonObjectConst panel = raw["panel"];
   if (!panel.isNull()) {
     command = PanelCommand{};
-    const char *view = panel["view"] | "";
     const char *source = panel["source"] | "";
     const char *plan = panel["plan"] | "";
-    if (!strcmp(view, "chase")) command.view = 0;
-    if (!strcmp(view, "top")) command.view = 1;
     if (!strcmp(source, "sim")) command.source = 0;
     if (!strcmp(source, "serial") || !strcmp(source, "live")) command.source = 1;
     if (!strcmp(plan, "shortest")) command.planMode = 0;

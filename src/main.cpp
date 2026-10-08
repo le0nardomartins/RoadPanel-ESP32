@@ -199,26 +199,9 @@ static void readSerial(uint32_t now) {
   }
 }
 
-// ── Botão BOOT: troca a vista ────────────────────────────────────────────
-static void readButton(uint32_t now) {
-#if VIEW_BUTTON_PIN >= 0
-  static bool last = true;
-  static uint32_t changedAt = 0;
-  bool level = digitalRead(VIEW_BUTTON_PIN);
-  if (level != last && now - changedAt > 40) {
-    changedAt = now;
-    last = level;
-    if (!level) app.toggleView();
-  }
-#endif
-}
-
 void setup() {
   Serial.setRxBufferSize(SERIAL_LINE_MAX * 2);
   Serial.begin(SERIAL_BAUD);
-#if VIEW_BUTTON_PIN >= 0
-  pinMode(VIEW_BUTTON_PIN, INPUT_PULLUP);
-#endif
   for (auto &core : buffers)
     for (auto &buf : core) {
       buf = (uint16_t *)heap_caps_malloc(SCREEN_W * BAND_H * 2, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
@@ -249,7 +232,6 @@ void setup() {
 void loop() {
   uint32_t now = millis();
   readSerial(now);
-  readButton(now);
   drawFrame(now);
 
   // fps (média de 1 s)

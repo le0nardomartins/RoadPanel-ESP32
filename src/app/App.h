@@ -15,7 +15,6 @@ struct Vec3 {
 
 enum class Source : uint8_t { Sim, Live };
 enum class LinkStatus : uint8_t { Connecting, Live, Waiting, Stale, Offline };
-enum class ViewMode : uint8_t { Chase, Top };
 enum class ManeuverIcon : uint8_t { Straight, Right, Left, Stop, Light, Flag, Done, Point };
 
 struct HudView {
@@ -75,7 +74,6 @@ class App {
   /** JSON sem "hud": o remetente está no ar mas o main.py ainda não publicou. */
   void onWaiting(uint32_t now);
   void onCommand(const PanelCommand &command);
-  void toggleView();
 
   /** Um quadro: atualiza tudo e preenche view. */
   void update(uint32_t now, FrameView &view);
@@ -163,7 +161,6 @@ class App {
   float gpsS0_ = 0, gpsS1_ = 0;
   Vec2 gpsStart_{0, 0}, gpsEnd_{0, 0};
   // Câmera
-  ViewMode viewMode_ = ViewMode::Chase;
   bool camReady_ = false;
   Vec3 camPos_{0, 0, 0}, camLook_{0, 0, 0};
   // Alertas e HUD

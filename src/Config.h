@@ -22,10 +22,6 @@
 #define SERIAL_BAUD 115200
 #define SERIAL_LINE_MAX 3072
 
-// ── Botão ──
-// BOOT (GPIO0) troca a vista: perseguição <-> topo. -1 desliga.
-#define VIEW_BUTTON_PIN 0
-
 // ── Desempenho ──
 #define RENDER_DUAL_CORE 1   // desenha faixas pares no núcleo 1 e ímpares no núcleo 0
 #define SHOW_FPS 0           // 1 = mostra o fps no canto da tela

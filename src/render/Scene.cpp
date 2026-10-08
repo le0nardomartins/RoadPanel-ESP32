@@ -546,6 +546,14 @@ void Scene::drawBand(Canvas &c) {
     c.spriteAffine(*s.sprite, s.cx, s.cy, s.ax, s.ay, s.bx, s.by, s.tint, s.fog, FOG);
   }
   if (!carDrawn) drawCar(c);
+  // Prévia GPS: anel pulsando em volta do carro (gpsPreview.js: carRing)
+  if (v.gpsVisible && car_.visible) {
+    float pulse = fractf(v.time * 0.8f);
+    float r = 9 + pulse * 10;
+    int a = (int)(255 * v.gpsOpacity * (1 - pulse));
+    c.roundRectStroke(car_.cx - r, car_.cy - r, 2 * r, 2 * r, r, 2.0f, GPS_BLUE, a);
+    c.roundRectStroke(car_.cx - 9, car_.cy - 9, 18, 18, 9, 1.6f, GPS_BLUE, (int)(200 * v.gpsOpacity));
+  }
   // ── Alfinete da prévia GPS ──
   if (v.gpsVisible && pin_.ok) {
     int a = (int)(255 * v.gpsOpacity);

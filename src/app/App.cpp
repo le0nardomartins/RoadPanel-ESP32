@@ -25,7 +25,6 @@ struct Chase {
 // ficar atrás da barra de métricas.
 constexpr Chase CHASE{4.8f, 3.7f, 3.4f, 0.0f};
 constexpr float FOV_DEG = 48;
-constexpr float ASPECT = 480.0f / 320.0f;
 
 const Location CAR_START{trackdata::CAR_START_EDGE, trackdata::CAR_START_S};
 const Location LAP_START{trackdata::LAP_START_EDGE, 0};
@@ -193,7 +192,6 @@ void App::onWaiting(uint32_t now) {
 }
 
 void App::onCommand(const PanelCommand &command) {
-  if (command.view >= 0) viewMode_ = command.view ? ViewMode::Top : ViewMode::Chase;
   if (command.source >= 0) setSource(command.source ? Source::Live : Source::Sim, last_, true);
   if (command.planMode >= 0) {
     PlanMode mode = command.planMode ? PlanMode::Car : PlanMode::Shortest;
@@ -203,8 +201,6 @@ void App::onCommand(const PanelCommand &command) {
     }
   }
 }
-
-void App::toggleView() { viewMode_ = viewMode_ == ViewMode::Chase ? ViewMode::Top : ViewMode::Chase; }
 
 void App::updateLink(uint32_t now) {
   if (!everOk_) {
@@ -352,35 +348,28 @@ void App::updateGps(uint32_t now, FrameView &view) {
 // ── Câmera (cameraRig.js) ────────────────────────────────────────────────
 void App::updateCamera(float dt, float wx, float wz, float dirX, float dirZ, FrameView &view) {
   Vec3 target, look;
-  bool framing = gpsActive_ && viewMode_ == ViewMode::Chase;
-  if (viewMode_ == ViewMode::Top) {
-    // Distância calculada pelo campo de visão para a pista inteira caber na área livre
-    // da tela (fora do cartão da missão e da barra de cima)
-    float w = trackdata::IMAGE_W * PX_TO_WORLD;
-    float h = trackdata::IMAGE_H * PX_TO_WORLD;
-    const float safeW = 0.64f, safeH = 0.74f, safeX = 0.15f, safeY = -0.04f;
+  // Sempre atrás do carro; na prévia GPS (parado na PARE ou num ponto) sobe e mostra o
+  // caminho até a próxima placa, quase de cima, e volta sozinha quando o carro segue.
+  bool framing = gpsActive_;
+  if (framing) {
+    // Vista de cima do caminho inteiro carro -> próxima placa, encaixada na área livre da tela
+    // (à direita do cartão da missão e acima do cartão da prévia). Norte da pista para cima.
+    float minX = 1e9f, maxX = -1e9f, minZ = 1e9f, maxZ = -1e9f;
+    for (int i = 0; i <= 24; i++) {
+      Vec2 p = plan_.line.sample(gpsS0_ + (gpsS1_ - gpsS0_) * i / 24.0f).pos;
+      minX = std::min(minX, p.x), maxX = std::max(maxX, p.x), minZ = std::min(minZ, p.y), maxZ = std::max(maxZ, p.y);
+    }
+    const float margin = 1.2f;   // m
+    float w = (maxX - minX) * PX_TO_WORLD + 2 * margin, h = (maxZ - minZ) * PX_TO_WORLD + 2 * margin;
+    // área livre: x 176..470 e y 44..232 de 480x320
+    const float safeW = 0.61f, safeH = 0.59f, safeX = 0.173f, safeY = -0.069f, aspect = 1.5f;
     float tanHalf = tanf(FOV_DEG * (float)M_PI / 360.0f);
-    float dist = std::max(h / (safeH * 2 * tanHalf), w / (safeW * ASPECT * 2 * tanHalf)) * 1.04f;
-    float viewW = 2 * dist * tanHalf * ASPECT;
-    float viewH = 2 * dist * tanHalf;
-    Vec3 center{w / 2 - safeX * viewW, 0, h / 2 - safeY * viewH};
+    float dist = std::max(6.0f, std::max(h / (safeH * 2 * tanHalf), w / (safeW * aspect * 2 * tanHalf)));
+    float viewW = 2 * dist * tanHalf * aspect, viewH = 2 * dist * tanHalf;
+    Vec3 center{(minX + maxX) / 2 * PX_TO_WORLD - safeX * viewW, 0, (minZ + maxZ) / 2 * PX_TO_WORLD - safeY * viewH};
     const float tilt = 0.18f;   // leve inclinação, mantém a sensação de 3D
     target = {center.x, dist * cosf(tilt), center.z + dist * sinf(tilt)};
     look = center;
-  } else if (framing) {
-    // Quase de cima, um pouco atrás do carro: enquadra o trecho carro -> placa
-    Vec3 a{gpsStart_.x * PX_TO_WORLD, 0, gpsStart_.y * PX_TO_WORLD};
-    Vec3 b{gpsEnd_.x * PX_TO_WORLD, 0, gpsEnd_.y * PX_TO_WORLD};
-    Vec3 center{(a.x + b.x) / 2, 0, (a.z + b.z) / 2};
-    float dx = b.x - a.x, dz = b.z - a.z;
-    float len = sqrtf(dx * dx + dz * dz);
-    float radius = std::max(2.5f, len / 2);
-    if (len > 1e-3f) { dx /= len; dz /= len; } else { dx = 0; dz = -1; }
-    float height = radius * 2.7f + 4;
-    float back = radius * 0.55f + 1.5f;
-    Vec3 aim{center.x + dx * radius * 0.12f, 0, center.z + dz * radius * 0.12f};
-    target = {aim.x - dx * back, height, aim.z - dz * back};
-    look = aim;
   } else {
     target = {wx - dirX * CHASE.back, CHASE.up, wz - dirZ * CHASE.back};
     look = {wx + dirX * CHASE.ahead, CHASE.lookUp, wz + dirZ * CHASE.ahead};
@@ -391,13 +380,13 @@ void App::updateCamera(float dt, float wx, float wz, float dirX, float dirZ, Fra
     camReady_ = true;
   }
   // Aproximação exponencial: segue o carro sem tremer e sem atraso perceptível
-  float k = 1 - expf(-dt * (viewMode_ == ViewMode::Top || framing ? 2.6f : 5.5f));
+  float k = 1 - expf(-dt * (framing ? 2.6f : 5.5f));
   camPos_ = lerp3(camPos_, target, k);
   camLook_ = lerp3(camLook_, look, std::min(1.0f, k * 1.6f));
   view.camPos = camPos_;
   view.camLook = camLook_;
   view.fovDeg = FOV_DEG;
-  bool chaseFog = viewMode_ == ViewMode::Chase && !framing;
+  bool chaseFog = !framing;
   view.fogNear = chaseFog ? 12 : 300;
   view.fogFar = chaseFog ? 40 : 400;
 }

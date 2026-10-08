@@ -50,13 +50,10 @@ def main():
     parser.add_argument('--baud', type=int, default=115200)
     parser.add_argument('--api', default='http://127.0.0.1:5000/api', help='base da API do carro')
     parser.add_argument('--hz', type=float, default=5.0, help='mensagens por segundo (o painel JS usa 5)')
-    parser.add_argument('--view', choices=('chase', 'top'), help='troca a vista do painel ao iniciar')
     args = parser.parse_args()
 
     ser = serial.Serial(args.port, args.baud, timeout=0)
     time.sleep(2)   # o ESP32 reinicia quando a porta abre
-    if args.view:
-        ser.write((json.dumps({'panel': {'view': args.view}}) + '\n').encode())
     url = args.api.rstrip('/') + '/vehicle_info'
     period = 1.0 / args.hz
     print(f'{url} -> {args.port} @ {args.baud} ({args.hz:g} Hz). Ctrl+C para sair.')

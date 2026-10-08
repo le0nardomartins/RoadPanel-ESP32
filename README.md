@@ -21,7 +21,8 @@ Se as cores saírem trocadas, mude `TFT_BGR`. Se saírem invertidas (fundo escur
 `TFT_INVERT`. Com fios curtos, `TFT_SPI_HZ 80000000` dobra a velocidade de envio. Para medir o fps,
 use `SHOW_FPS 1`.
 
-O botão **BOOT** troca a vista: perseguição ↔ topo.
+A vista é sempre de perseguição, atrás do carro. Quando o carro para na PARE ou chega num ponto, a
+câmera sobe sozinha e mostra o caminho até a próxima placa (prévia GPS); depois volta para trás do carro.
 
 ## Dados do carro (serial, 115200)
 
@@ -44,7 +45,7 @@ pip install pyserial
 python tools/serial_bridge.py --port COM5 --api http://<ip-do-carro>:5000/api
 ```
 
-Comandos opcionais: `{"panel":{"view":"top"}}`, `{"panel":{"source":"sim"}}` e
+Comandos opcionais: `{"panel":{"source":"sim"}}` e
 `{"panel":{"plan":"car"}}` (trajetória pela tabela do carro em vez do caminho livre).
 
 Quando chega o primeiro dado válido, o painel sai da simulação e entra em **Ao vivo**, igual ao JS.
@@ -75,5 +76,5 @@ estado do carro: a missão (`hud.route`), as detecções e a telemetria.
 
 O carro é o modelo 3D `3DModel/base_basic_pbr.glb`, renderizado no PC com a iluminação do painel JS e
 guardado em `src/generated/car_sprites.h`. São 25 ângulos da câmera de perseguição, 13 do ângulo
-intermediário e a vista de cima (girada em tempo real). O ESP32 só escolhe e escala a imagem certa;
+intermediário e a vista de cima da prévia GPS (girada em tempo real). O ESP32 só escolhe e escala a imagem certa;
 ele não desenha triângulos.
