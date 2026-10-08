@@ -21,7 +21,9 @@ constexpr float SNAP_DISTANCE_PX = 4;
 struct Chase {
   float back, up, ahead, lookUp;
 };
-constexpr Chase CHASE{4.8f, 3.7f, 4.6f, 0.0f};
+// Na tela de 480x320 o carro fica um pouco mais alto que no JS (ahead 4,6 -> 3,4) para não
+// ficar atrás da barra de métricas.
+constexpr Chase CHASE{4.8f, 3.7f, 3.4f, 0.0f};
 constexpr float FOV_DEG = 48;
 constexpr float ASPECT = 480.0f / 320.0f;
 

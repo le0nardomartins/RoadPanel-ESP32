@@ -7,4 +7,5 @@
  src/render/../app/../track/Geometry.h \
  src/render/../app/../track/TrackTypes.h \
  src/render/../app/../track/../generated/track_data.h \
- src/render/../generated/sprites.h src/render/../generated/track_sdf.h
+ src/render/../generated/car_sprites.h src/render/../generated/sprites.h \
+ src/render/../generated/track_sdf.h

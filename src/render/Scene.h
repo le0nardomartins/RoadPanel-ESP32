@@ -50,16 +50,21 @@ class Scene {
   };
   struct SignDraw {
     const Sprite *sprite;
-    float cx, top, height, squeeze, depth, fog;
-    float postX, postTop, postBottom, postWidth;
+    float cx, cy;                 // centro da placa na tela
+    float ax, ay, bx, by;         // afim: 1 px da imagem -> tela (eixo horizontal e vertical da placa)
+    float depth, fog;
+    float postX0, postY0, postX1, postY1, postWidth;   // haste: do chão ao topo, já em perspectiva
     Rgb tint;
   };
-  struct Face {
-    float xy[8];
-    Rgb color;
-    int lampCount;
-    float lamps[2][8];
-    Rgb lampColor;
+  /** Carro: imagem pré-renderizada do modelo 3D (car_sprites.h). */
+  struct CarDraw {
+    bool visible = false;
+    bool affine = false;        // vista de cima: imagem girada/achatada
+    const Sprite *sprite = nullptr;
+    float cx = 0, cy = 0;       // centro do carro na tela
+    float height = 0;           // altura na tela (imagem de perseguição)
+    float ax = 0, ay = 0, bx = 0, by = 0;   // transformação afim (vista de cima)
+    float depth = 0;
   };
 
   Projected project(float X, float Y, float Z) const;   // metros
@@ -81,8 +86,8 @@ class Scene {
   std::vector<Strip> ribbon_, gps_;
   float ribbonHalf_ = 0, gpsHalf_ = 0;
   std::vector<SignDraw> signs_;
-  std::vector<Face> carFaces_;
-  std::vector<float> carEdges_;   // pares de pontos (x0,y0,x1,y1) das arestas visíveis
+  CarDraw car_;
+  void drawCar(Canvas &c) const;
   int shadowY0_ = 0, shadowY1_ = -1;
   Projected pin_{0, 0, 0, false};
   Occluder occluders_[MAX_OCCLUDERS];

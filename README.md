@@ -72,3 +72,8 @@ distância da pista** (`track_sdf.h`). Assim as linhas saem suavizadas em qualqu
 A pista, as placas (posição de A, B, C, PARE, desvios e semáforo), a largada, a fonte e os ícones
 foram gerados uma vez a partir do painel JS e estão em `src/generated/`. Pela serial chegam só o
 estado do carro: a missão (`hud.route`), as detecções e a telemetria.
+
+O carro é o modelo 3D `3DModel/base_basic_pbr.glb`, renderizado no PC com a iluminação do painel JS e
+guardado em `src/generated/car_sprites.h`. São 25 ângulos da câmera de perseguição, 13 do ângulo
+intermediário e a vista de cima (girada em tempo real). O ESP32 só escolhe e escala a imagem certa;
+ele não desenha triângulos.

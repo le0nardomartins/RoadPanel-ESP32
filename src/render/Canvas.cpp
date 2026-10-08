@@ -237,3 +237,49 @@ void Canvas::sprite(const Sprite &s, float cx, float top, float height, float sq
     }
   }
 }
+
+void Canvas::spriteAffine(const Sprite &s, float cx, float cy, float ax, float ay, float bx, float by, Rgb tint,
+                          float fog, Rgb fogColor) {
+  float det = ax * by - bx * ay;
+  if (fabsf(det) < 1e-6f) return;
+  // caixa na tela pelos 4 cantos
+  float hw = s.w / 2.0f, hh = s.h / 2.0f;
+  float ex = fabsf(ax) * hw + fabsf(bx) * hh, ey = fabsf(ay) * hw + fabsf(by) * hh;
+  int y0 = std::max((int)floorf(cy - ey), bandY), y1 = std::min((int)ceilf(cy + ey) + 1, bandY + BAND_H);
+  if (y0 >= y1) return;
+  int x0 = std::max((int)floorf(cx - ex), 0), x1 = std::min((int)ceilf(cx + ex) + 1, SCREEN_W);
+  // inversa: tela -> imagem
+  float ia = by / det, ib = -bx / det, ic = -ay / det, id = ax / det;
+  for (int yy = y0; yy < y1; yy++) {
+    float dy = yy + 0.5f - cy;
+    for (int xx = x0; xx < x1; xx++) {
+      float dx = xx + 0.5f - cx;
+      float u = ia * dx + ib * dy + hw - 0.5f, v = ic * dx + id * dy + hh - 0.5f;
+      if (u <= -1 || v <= -1 || u >= s.w || v >= s.h) continue;
+      int iu = (int)floorf(u), iv = (int)floorf(v);
+      float fu = u - iu, fv = v - iv;
+      float a = 0, r = 0, g = 0, b = 0;
+      for (int k = 0; k < 4; k++) {
+        int sx = iu + (k & 1), sy = iv + (k >> 1);
+        if (sx < 0 || sy < 0 || sx >= s.w || sy >= s.h) continue;
+        float wgt = ((k & 1) ? fu : 1 - fu) * ((k >> 1) ? fv : 1 - fv);
+        int idx = sy * s.w + sx;
+        float al = s.alpha[idx] * wgt;
+        if (al <= 0) continue;
+        uint16_t c = s.rgb[idx];
+        a += al;
+        r += al * (((c >> 11) & 0x1F) << 3);
+        g += al * (((c >> 5) & 0x3F) << 2);
+        b += al * ((c & 0x1F) << 3);
+      }
+      if (a < 1) continue;
+      r = r / a * tint.r / 255;
+      g = g / a * tint.g / 255;
+      b = b / a * tint.b / 255;
+      r += (fogColor.r - r) * fog;
+      g += (fogColor.g - g) * fog;
+      b += (fogColor.b - b) * fog;
+      blendPx(xx, yy, {(uint8_t)r, (uint8_t)g, (uint8_t)b}, (int)a);
+    }
+  }
+}

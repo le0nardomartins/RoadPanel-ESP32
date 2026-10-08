@@ -86,6 +86,10 @@ class Canvas {
   void mask(const Mask &m, int x, int y, Rgb c, int alpha = 255);
   /** Placa: imagem com alfa, escalada (bilinear), centrada em (cx, top). squeeze < 1 estreita (vista de lado). */
   void sprite(const Sprite &s, float cx, float top, float height, float squeeze, Rgb tint, float fog, Rgb fogColor);
+  /** Imagem com alfa sob uma transformação afim: o centro da imagem vai para (cx, cy) e um passo de
+   *  1 px na imagem anda (ax, ay) na tela em x e (bx, by) em y. Serve para girar e achatar. */
+  void spriteAffine(const Sprite &s, float cx, float cy, float ax, float ay, float bx, float by,
+                    Rgb tint = {255, 255, 255}, float fog = 0, Rgb fogColor = {0, 0, 0});
 
   uint16_t *buf = nullptr;
   int bandY = 0;

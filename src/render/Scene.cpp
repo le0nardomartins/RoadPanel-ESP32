@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "../generated/car_sprites.h"
 #include "../generated/sprites.h"
 #include "../generated/track_sdf.h"
 
@@ -20,8 +21,6 @@ constexpr Rgb SKY_TOP = hex(0xf7f9fc);
 constexpr Rgb ROUTE = hex(0x2f7bff);
 constexpr Rgb ROUTE_EDGE = hex(0x1546b8);
 constexpr Rgb GPS_BLUE = hex(0x1f5fd8);
-constexpr Rgb CAR_WHITE = hex(0xf6f8fb);
-constexpr Rgb CAR_BLACK = hex(0x11151c);
 constexpr Rgb POST = hex(0x1b2028);
 constexpr Rgb SIGN_BACK = hex(0x3a414d);
 constexpr Rgb WHITE = hex(0xffffff);
@@ -33,8 +32,10 @@ constexpr float RIBBON_HALF = 0.66f * PX / 2;
 constexpr float GPS_HALF = 0.44f * PX / 2;
 constexpr float RIBBON_FADE_M = 34;
 constexpr float STRIP_STEP = 5;               // px entre amostras da fita
-// Carro (car.js: CAR_SIZE, carro reserva em caixas)
-constexpr float CAR_LEN = 1.2f, CAR_WID = 0.8f, CAR_HGT = 0.48f;
+// Carro (car.js: CAR_SIZE; o modelo 3D é escalado para 0,8 m de largura e 1,2 m de comprimento)
+constexpr float CAR_LEN = 1.2f, CAR_WID = 0.8f;
+constexpr float RAD2DEG = 180.0f / (float)M_PI;
+constexpr float TOP_FROM_DEG = 64;   // acima disso a câmera vê o carro "de cima"
 // Placas (signs.js)
 constexpr float SIGN_SIZE = 0.6f, POST_HEIGHT = 0.9f;
 
@@ -204,21 +205,31 @@ void Scene::prepareSigns(const FrameView &view) {
     const SignDef &sign = trackdata::SIGNS[i];
     float X = sign.at.x * INV_PX, Z = sign.at.y * INV_PX;
     bool light = sign.kind == SignKind::TrafficLight;
+    // signs.js: poste de 0,9 m (0,72 m no semáforo) e a placa encaixada no topo
     float postTop = light ? POST_HEIGHT * 0.8f : POST_HEIGHT;
     float center = light ? postTop + 0.2f : POST_HEIGHT + SIGN_SIZE / 2 - 0.04f;
-    float height = light ? 0.44f / 0.88f : SIGN_SIZE;   // a caixa do semáforo ocupa 88% do sprite
-    Projected top = project(X, center + height / 2, Z);
-    Projected bottom = project(X, center - height / 2, Z);
+    float size = light ? 0.44f / 0.88f : SIGN_SIZE;   // a caixa do semáforo ocupa 88% da imagem
+    Projected c = project(X, center, Z);
     Projected ground = project(X, 0, Z);
     Projected postEnd = project(X, postTop, Z);
-    if (!top.ok || !bottom.ok || !ground.ok || !postEnd.ok) continue;
-    if (top.depth > view.fogFar + 2) continue;
-    float h = bottom.y - top.y;
-    if (h < 2) continue;
-    // Vista de lado estreita a placa; por trás aparece escura (menos os pontos, de duas faces)
+    Projected bottom = project(X, center - size / 2, Z);
+    if (!c.ok || !ground.ok || !postEnd.ok || !bottom.ok) continue;
+    if (c.depth > view.fogFar + 2) continue;
+    // Eixo horizontal da placa no mundo. Quem olha a frente lê da esquerda para a direita;
+    // por trás a face também fica legível (como a face traseira girada do JS), só que escura.
+    // O semáforo é uma caixa: sempre de frente para a câmera.
     float vx = px_ - X, vz = pz_ - Z;
     float vl = sqrtf(vx * vx + vz * vz);
     float facingDot = vl > 1e-4f ? (sign.facing.x * vx + sign.facing.y * vz) / vl : 1;
+    float hx, hz;
+    if (light) {
+      hx = rx_, hz = rz_;
+    } else {
+      hx = sign.facing.y, hz = -sign.facing.x;
+      if (facingDot < 0) hx = -hx, hz = -hz;
+    }
+    Projected right = project(X + hx * size / 2, center, Z + hz * size / 2);
+    if (!right.ok) continue;
     SignDraw d;
     switch (sign.kind) {
       case SignKind::Point:
@@ -230,16 +241,16 @@ void Scene::prepareSigns(const FrameView &view) {
         d.sprite = view.light == 0 ? &sprites::light_red : view.light == 1 ? &sprites::light_yellow
                    : view.light == 2 ? &sprites::light_green : &sprites::light_off;
     }
-    d.squeeze = light ? 1.0f : std::max(0.12f, fabsf(facingDot));
+    float halfW = d.sprite->w / 2.0f, halfH = d.sprite->h / 2.0f;
+    d.cx = c.x, d.cy = c.y;
+    d.ax = (right.x - c.x) / halfW, d.ay = (right.y - c.y) / halfW;
+    d.bx = (bottom.x - c.x) / halfH, d.by = (bottom.y - c.y) / halfH;
+    if (fabsf(d.by) * d.sprite->h < 2) continue;
     d.tint = (!light && sign.kind != SignKind::Point && facingDot < 0) ? SIGN_BACK : WHITE;
-    d.cx = (top.x + bottom.x) / 2;
-    d.top = top.y;
-    d.height = h;
     d.depth = ground.depth;
     d.fog = clamp01((ground.depth - view.fogNear) / std::max(1.0f, view.fogFar - view.fogNear));
-    d.postX = ground.x;
-    d.postTop = postEnd.y;
-    d.postBottom = ground.y;
+    d.postX0 = ground.x, d.postY0 = ground.y;
+    d.postX1 = postEnd.x, d.postY1 = postEnd.y;
     d.postWidth = std::max(1.2f, 0.048f * fpx_ / ground.depth);
     signs_.push_back(d);
   }
@@ -247,23 +258,13 @@ void Scene::prepareSigns(const FrameView &view) {
 }
 
 void Scene::prepareCar(const FrameView &view) {
-  carFaces_.clear();
-  carEdges_.clear();
+  car_ = CarDraw{};
   float cx = view.carX * INV_PX, cz = view.carY * INV_PX;
   float fx = view.carDirX, fz = view.carDirY;   // frente
   float rx = -fz, rz = fx;                       // direita
-  // luz: hemisfério (de cima) + sol em (-6, 12, 4)
-  const float L[3] = {-0.4423f, 0.8847f, 0.1474f};
+  const float cy = carsprites::CENTER_HEIGHT;
 
-  struct Box {
-    float w, h, l, y0, back;   // back > 0 desloca para trás
-    Rgb color;
-  };
-  const Box boxes[2] = {
-      {CAR_WID, CAR_HGT * 0.62f, CAR_LEN, 0.03f, 0, CAR_WHITE},
-      {CAR_WID * 0.82f, CAR_HGT * 0.38f, CAR_LEN * 0.52f, CAR_HGT * 0.62f + 0.03f, CAR_LEN * 0.06f, CAR_BLACK},
-  };
-  // Sombra suave no chão: caixa na tela (o desenho é feito no próprio chão)
+  // Sombra suave no chão: faixa de linhas da tela em que ela aparece
   shadowY0_ = SCREEN_H, shadowY1_ = -1;
   for (int k = 0; k < 4; k++) {
     float a = (k & 1 ? 1 : -1) * CAR_LEN * 0.85f, b = (k & 2 ? 1 : -1) * CAR_WID * 1.05f;
@@ -273,76 +274,53 @@ void Scene::prepareCar(const FrameView &view) {
     shadowY1_ = std::max(shadowY1_, (int)p.y + 2);
   }
 
-  for (const Box &box : boxes) {
-    // canto (i, j, k): lado (-/+ direita), baixo/cima, frente/trás
-    Projected corner[8];
-    bool ok = true;
-    for (int i = 0; i < 8; i++) {
-      float sx = (i & 1 ? 0.5f : -0.5f) * box.w;
-      float sy = box.y0 + (i & 2 ? box.h : 0);
-      float sz = (i & 4 ? -0.5f : 0.5f) * box.l - box.back;   // +: frente
-      corner[i] = project(cx + rx * sx + fx * sz, sy, cz + rz * sx + fz * sz);
-      ok &= corner[i].ok;
-    }
-    if (!ok) continue;
-    // faces: índices dos cantos (em volta) e normal no mundo
-    struct F {
-      int a, b, c, d;
-      float nx, ny, nz;
-      int lamp;   // 0 nenhuma, 1 farol (frente), 2 lanterna (trás)
-    };
-    const F faces[6] = {
-        {2, 3, 7, 6, 0, 1, 0, 0},                                   // cima
-        {0, 1, 3, 2, fx, 0, fz, 1},                                 // frente (sz > 0)
-        {4, 5, 7, 6, -fx, 0, -fz, 2},                               // trás
-        {1, 3, 7, 5, rx, 0, rz, 0},                                 // direita
-        {0, 2, 6, 4, -rx, 0, -rz, 0},                               // esquerda
-        {0, 1, 5, 4, 0, -1, 0, 0},                                  // baixo
-    };
-    float boxCx = cx - fx * box.back, boxCz = cz - fz * box.back, boxCy = box.y0 + box.h / 2;
-    for (const F &f : faces) {
-      // visível se a câmera está do lado de fora da face
-      float ext = (f.ny != 0) ? box.h / 2 : (fabsf(f.nx * fx + f.nz * fz) > 0.5f ? box.l / 2 : box.w / 2);
-      float ccx = boxCx + f.nx * ext, ccy = boxCy + f.ny * ext, ccz = boxCz + f.nz * ext;
-      if ((px_ - ccx) * f.nx + (py_ - ccy) * f.ny + (pz_ - ccz) * f.nz <= 0) continue;
-      float lambert = std::max(0.0f, f.nx * L[0] + f.ny * L[1] + f.nz * L[2]);
-      float shade = std::min(1.04f, 0.72f + 0.16f * f.ny + 0.2f * lambert);
-      Face face;
-      const int idx[4] = {f.a, f.b, f.c, f.d};
-      for (int k = 0; k < 4; k++) {
-        face.xy[k * 2] = corner[idx[k]].x;
-        face.xy[k * 2 + 1] = corner[idx[k]].y;
-      }
-      face.color = {(uint8_t)std::min(255.0f, box.color.r * shade), (uint8_t)std::min(255.0f, box.color.g * shade),
-                    (uint8_t)std::min(255.0f, box.color.b * shade)};
-      face.lampCount = 0;
-      if (f.lamp && box.color.r > 128) {
-        // faróis/lanternas: 0,13 x 0,045 m a 30% da largura de cada lado
-        bool front = f.lamp == 1;
-        face.lampColor = front ? hex(0x9cc4ff) : hex(0xe0334f);
-        float sz = (front ? 0.5f : -0.5f) * box.l + (front ? 0.006f : -0.006f);
-        float ly = CAR_HGT * 0.42f + 0.03f;
-        for (int side = 0; side < 2; side++) {
-          float lx = (side ? 0.3f : -0.3f) * box.w;
-          const float qx[4] = {-0.065f, 0.065f, 0.065f, -0.065f}, qy[4] = {-0.0225f, -0.0225f, 0.0225f, 0.0225f};
-          bool okLamp = true;
-          for (int k = 0; k < 4; k++) {
-            float wx = lx + qx[k];
-            Projected p = project(cx + rx * wx + fx * sz, ly + qy[k], cz + rz * wx + fz * sz);
-            okLamp &= p.ok;
-            face.lamps[face.lampCount][k * 2] = p.x;
-            face.lamps[face.lampCount][k * 2 + 1] = p.y;
-          }
-          if (okLamp) face.lampCount++;
-        }
-      }
-      carFaces_.push_back(face);
-      // arestas da face (contorno escuro fino, como as LineSegments do carro)
-      for (int k = 0; k < 4; k++) {
-        const Projected &a = corner[idx[k]], &b = corner[idx[(k + 1) % 4]];
-        carEdges_.insert(carEdges_.end(), {a.x, a.y, b.x, b.y});
-      }
-    }
+  Projected c = project(cx, cy, cz);
+  if (!c.ok) return;
+  car_.visible = true;
+  car_.cx = c.x;
+  car_.cy = c.y;
+  car_.depth = c.depth;
+
+  // De onde a câmera vê o carro: elevação e azimute (0 = bem atrás, + = pela direita)
+  float dx = px_ - cx, dy = py_ - cy, dz = pz_ - cz;
+  float horiz = sqrtf(dx * dx + dz * dz);
+  float elev = atan2f(dy, horiz) * RAD2DEG;
+  float az = atan2f(dx * rx + dz * rz, -(dx * fx + dz * fz)) * RAD2DEG;
+
+  if (elev >= TOP_FROM_DEG) {
+    // De cima: projeta os eixos do carro e monta a afim (1 px da imagem = 1/PPM m)
+    float ppmScreen = fpx_ / c.depth;
+    const bool small = ppmScreen < 0.6f * carsprites::TOP_PPM;
+    car_.sprite = small ? &carsprites::TOP_SMALL : &carsprites::TOP;
+    float step = 1.0f / (small ? carsprites::TOP_SMALL_PPM : carsprites::TOP_PPM);
+    const float L = 0.5f;
+    Projected pr = project(cx + rx * L, cy, cz + rz * L);   // +x da imagem = direita do carro
+    Projected pb = project(cx - fx * L, cy, cz - fz * L);   // +y da imagem = para trás
+    if (!pr.ok || !pb.ok) { car_.visible = false; return; }
+    car_.affine = true;
+    car_.ax = (pr.x - c.x) / L * step, car_.ay = (pr.y - c.y) / L * step;
+    car_.bx = (pb.x - c.x) / L * step, car_.by = (pb.y - c.y) / L * step;
+    return;
+  }
+  // Perseguição (ou intermediária): imagem do ângulo mais próximo, em escala
+  bool mid = elev > (carsprites::CHASE_ELEVATION + carsprites::MID_ELEVATION) / 2;
+  const Sprite *set = mid ? carsprites::MID : carsprites::CHASE;
+  int count = mid ? carsprites::MID_COUNT : carsprites::CHASE_COUNT;
+  float az0 = mid ? carsprites::MID_AZ0 : carsprites::CHASE_AZ0;
+  float stepDeg = mid ? carsprites::MID_AZ_STEP : carsprites::CHASE_AZ_STEP;
+  float ppm = mid ? carsprites::MID_PPM : carsprites::CHASE_PPM;
+  int i = (int)lroundf((az - az0) / stepDeg);
+  i = std::max(0, std::min(count - 1, i));
+  car_.sprite = &set[i];
+  car_.height = set[i].h * (fpx_ / c.depth) / ppm;
+}
+
+void Scene::drawCar(Canvas &c) const {
+  if (!car_.visible) return;
+  if (car_.affine) {
+    c.spriteAffine(*car_.sprite, car_.cx, car_.cy, car_.ax, car_.ay, car_.bx, car_.by);
+  } else {
+    c.sprite(*car_.sprite, car_.cx, car_.cy - car_.height / 2, car_.height, 1.0f, WHITE, 0, FOG);
   }
 }
 
@@ -551,24 +529,23 @@ void Scene::drawBand(Canvas &c) {
   if (v.gpsVisible) {
     drawStrips(c, gps_, true);
   }
-  // ── Placas (de longe para perto) ──
+  // ── Placas e carro, de longe para perto ──
+  bool carDrawn = false;
   for (const SignDraw &s : signs_) {
-    if (s.postBottom < c.bandY - 2 && s.top < c.bandY - 2) continue;
+    if (!carDrawn && s.depth < car_.depth) {
+      drawCar(c);
+      carDrawn = true;
+    }
+    float spanY = fabsf(s.by) * s.sprite->h / 2 + fabsf(s.ay) * s.sprite->w / 2;
+    if (s.postY0 < c.bandY - 2 && s.cy + spanY < c.bandY - 2) continue;
     Rgb post = POST;
     post.r += (uint8_t)((FOG.r - post.r) * s.fog);
     post.g += (uint8_t)((FOG.g - post.g) * s.fog);
     post.b += (uint8_t)((FOG.b - post.b) * s.fog);
-    c.line(s.postX, s.postTop, s.postX, s.postBottom, s.postWidth, post);
-    c.sprite(*s.sprite, s.cx, s.top, s.height, s.squeeze, s.tint, s.fog, FOG);
+    c.line(s.postX0, s.postY0, s.postX1, s.postY1, s.postWidth, post);
+    c.spriteAffine(*s.sprite, s.cx, s.cy, s.ax, s.ay, s.bx, s.by, s.tint, s.fog, FOG);
   }
-  // ── Carro ──
-  for (const Face &f : carFaces_) {
-    c.convex(f.xy, 4, f.color);
-    for (int k = 0; k < f.lampCount; k++) c.convex(f.lamps[k], 4, f.lampColor);
-  }
-  for (size_t k = 0; k + 3 < carEdges_.size(); k += 4) {
-    c.line(carEdges_[k], carEdges_[k + 1], carEdges_[k + 2], carEdges_[k + 3], 0.9f, CAR_BLACK, 150);
-  }
+  if (!carDrawn) drawCar(c);
   // ── Alfinete da prévia GPS ──
   if (v.gpsVisible && pin_.ok) {
     int a = (int)(255 * v.gpsOpacity);
