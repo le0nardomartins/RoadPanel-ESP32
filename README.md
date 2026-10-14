@@ -45,11 +45,31 @@ pip install pyserial
 python tools/serial_bridge.py --port COM5 --api http://<ip-do-carro>:5000/api
 ```
 
-Comandos opcionais: `{"panel":{"source":"sim"}}` e
-`{"panel":{"plan":"car"}}` (trajetória pela tabela do carro em vez do caminho livre).
+Comandos opcionais: `{"panel":{"source":"sim"}}`,
+`{"panel":{"plan":"car"}}` (trajetória pela tabela do carro em vez do caminho livre) e
+`{"panel":{"sim_route":"B → A"}}` (missão da simulação: coleta em B, entrega em A; sai de onde o
+carro está).
 
 Quando chega o primeiro dado válido, o painel sai da simulação e entra em **Ao vivo**, igual ao JS.
 Sem dados por 3 s, ele mostra "Sem sinal"; com o `_ts` parado, "Dados parados".
+
+## Simulação
+
+O carro simulado anda a `SIM_SPEED_MS` (1,0 m/s, em `src/Config.h`), sempre no sentido da pista
+(mão única). Ao parar numa placa (ponto A/B/C ou PARE) a câmera abre e mostra a pista inteira,
+segura essa vista enquanto o carro espera e volta para trás dele quando ele segue. A simulação não
+reinicia: depois da entrega o carro completa a volta, para na linha de chegada e fica em
+"Percurso finalizado" até chegar uma missão nova pela serial.
+
+## Ambiente de testes no PC
+
+`tools\sim\build.bat` compila a lógica e o desenho do firmware (os mesmos `.cpp`) com o MSVC e
+roda em tempo virtual: confere coleta e entrega em todas as combinações de pontos, mão única (inclusive
+no modo ao vivo, com marcos corrigindo a estimativa), o zoom da pista inteira, quadros lentos (~6 fps),
+o fim do percurso e defeitos de desenho (nenhuma faixa escura cortando a tela). Os quadros (480×320,
+como no TFT) ficam em `tools\sim\out`. Para gravar uma missão inteira quadro a quadro:
+`python tools\sim\run.py tools\sim\build\roadpanel_sim_*.dll pasta frames AC 250` (um quadro a cada
+250 ms). Precisa do Visual Studio com C++ e do Python.
 
 ## Como funciona
 

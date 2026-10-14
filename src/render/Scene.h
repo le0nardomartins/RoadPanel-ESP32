@@ -44,6 +44,15 @@ class Scene {
     float len, s0;              // comprimento e posição ao longo da trajetória (px)
     int x0, y0, x1, y1;         // caixa na tela
   };
+  /** Lista de faixas com memória fixa. Antes era um std::vector que crescia a cada quadro: na vista
+   *  de cima a rota inteira fica visível, o new falhava no ESP32 sem PSRAM e a placa reiniciava. */
+  static constexpr int MAX_STRIPS = 320;
+  struct StripList {
+    Strip items[MAX_STRIPS];
+    int count = 0;
+    const Strip *begin() const { return items; }
+    const Strip *end() const { return items + count; }
+  };
   struct Projected {
     float x, y, depth;
     bool ok;
@@ -68,11 +77,11 @@ class Scene {
   };
 
   Projected project(float X, float Y, float Z) const;   // metros
-  void buildStrips(std::vector<Strip> &out, const Polyline &line, float s0, float s1, float halfWidth);
+  void buildStrips(StripList &out, const Polyline &line, float s0, float s1, float halfWidth, float step);
   void prepareCar(const FrameView &view);
   void prepareSigns(const FrameView &view);
   void shadeGround(float wx, float wy, float aa, bool carShadow, float &r, float &g, float &b) const;
-  void drawStrips(Canvas &c, const std::vector<Strip> &strips, bool gps);
+  void drawStrips(Canvas &c, const StripList &strips, bool gps);
 
   // Câmera (metros)
   float px_, py_, pz_;          // posição
@@ -83,7 +92,7 @@ class Scene {
   float horizonY_;
   Row rows_[SCREEN_H];
   const FrameView *view_ = nullptr;
-  std::vector<Strip> ribbon_, gps_;
+  StripList ribbon_, gps_;
   float ribbonHalf_ = 0, gpsHalf_ = 0;
   std::vector<SignDraw> signs_;
   CarDraw car_;

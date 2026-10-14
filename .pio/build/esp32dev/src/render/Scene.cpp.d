@@ -1,6 +1,7 @@
 .pio/build/esp32dev/src/render/Scene.cpp.o: src/render/Scene.cpp \
  src/render/Scene.h src/render/Canvas.h src/render/FontTypes.h \
- src/render/../app/App.h src/render/../app/../link/VehicleData.h \
+ src/render/../app/App.h src/render/../app/../Config.h \
+ src/render/../app/../link/VehicleData.h \
  src/render/../app/../track/Localizer.h \
  src/render/../app/../track/Planner.h \
  src/render/../app/../track/Network.h \

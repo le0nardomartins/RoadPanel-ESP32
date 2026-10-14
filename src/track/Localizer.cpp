@@ -31,6 +31,7 @@ constexpr float GATE_RELEASE = 75;    // ~1,5 m de odometria além do portão pa
 void Localizer::reset() {
   gateFloor_ = -INFINITY;
   overflow_ = 0;
+  behind_ = 0;
   waiting_ = nullptr;
   speedSource = SpeedSource::None;
 }
@@ -60,8 +61,11 @@ float Localizer::speed(const VehicleData *data, float pwmToMs) {
 
 float Localizer::step(const Plan &plan, float s, const VehicleData *data, float dt, float speedMs, float metersPerPx,
                       uint32_t now, bool routeShrank, bool hasRoute) {
-  // 1) Odometria
-  float next = s + (speedMs / metersPerPx) * dt;
+  // 1) Odometria (paga primeiro o que um marco mandou recuar: o carro espera, não dá ré)
+  float advance = (speedMs / metersPerPx) * dt;
+  float paid = std::min(advance, behind_);
+  behind_ -= paid;
+  float next = s + advance - paid;
 
   // 2) Marcos: bordas de subida do que o carro detectou
   if (data && prev_.valid) {
@@ -105,6 +109,14 @@ float Localizer::step(const Plan &plan, float s, const VehicleData *data, float 
     }
   } else {
     waiting_ = nullptr;
+  }
+  // Mão única: a estimativa nunca volta na trajetória. Marco atrás de onde o painel já está
+  // vira espera (o carro fica parado até a odometria alcançar a correção).
+  if (next < s) {
+    behind_ += s - next;
+    next = s;
+  } else if (next > s + advance - paid + 0.001f) {
+    behind_ = 0;   // marco à frente: a correção já desfez qualquer atraso pendente
   }
   return next;
 }

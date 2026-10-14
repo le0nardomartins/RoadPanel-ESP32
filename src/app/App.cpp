@@ -14,7 +14,7 @@ constexpr uint32_t REVEAL_MS = 1100;
 constexpr uint32_t GPS_DRAW_MS = 1100;
 constexpr uint32_t GPS_FADE_MS = 450;
 constexpr uint32_t HUD_INTERVAL_MS = 120;
-constexpr uint32_t SIM_RESTART_MS = 6000;  // demo: recomeça a missão simulada depois de finalizar
+constexpr float MAX_DT = 0.5f;   // s: quadros lentos do ESP32 não atrasam a simulação (antes 0,1 s)
 constexpr float SNAP_DISTANCE_PX = 4;
 
 // Câmera mais alta e olhando para baixo: horizonte perto de 30% do topo, como no BYD
@@ -148,7 +148,8 @@ void App::applyServerRoute(const std::string &next, const std::string &raw, uint
       int seen = 0;
       for (const PlanEvent &e : plan_.events) {
         if (e.type == EventType::Point && e.target && ++seen == confirmed) {
-          s_ = std::max(0.0f, std::min(plan_.length, e.s + 1));
+          // vai até a placa se ainda não chegou; já tendo passado, não volta (mão única)
+          s_ = std::max(s_, std::min(plan_.length, e.s + 1));
           break;
         }
       }
@@ -193,6 +194,7 @@ void App::onWaiting(uint32_t now) {
 
 void App::onCommand(const PanelCommand &command) {
   if (command.source >= 0) setSource(command.source ? Source::Live : Source::Sim, last_, true);
+  if (command.hasSimRoute) setSimRoute(command.simRoute, last_);
   if (command.planMode >= 0) {
     PlanMode mode = command.planMode ? PlanMode::Car : PlanMode::Shortest;
     if (mode != planMode_) {
@@ -232,6 +234,15 @@ void App::setSource(Source source, uint32_t now, bool byUser) {
 }
 
 // ── Simulação ────────────────────────────────────────────────────────────
+void App::setSimRoute(const std::string &route, uint32_t now) {
+  simRoute_ = route;
+  simDone_ = 0;
+  stopHoldUntil_ = pointHoldUntil_ = 0;
+  missionDone_ = false;
+  // Antes do 1º quadro o update() já monta o plano da partida; depois, segue de onde o carro está
+  if (!first_ && source_ == Source::Sim) replan(true, nullptr, now);
+}
+
 const PlanEvent *App::nextEvent(EventType type, float maxPx) const {
   for (const PlanEvent &e : plan_.events) {
     if (e.type == type && e.s - s_ >= -2 && e.s - s_ <= maxPx) return &e;
@@ -239,18 +250,9 @@ const PlanEvent *App::nextEvent(EventType type, float maxPx) const {
   return nullptr;
 }
 
-float App::simSpeedPx(uint32_t now) {
+float App::simSpeedPx(uint32_t now) const {
   if (missionDone_ || now < stopHoldUntil_ || now < pointHoldUntil_) return 0;
-  float speedPx = simSpeed_ / METERS_PER_PX;
-  if (const PlanEvent *stop = nextEvent(EventType::Stop, 8)) {
-    int key = (int)plan_.length * 8192 + (int)stop->s;
-    if (stoppedAtKey_ != key) {
-      stoppedAtKey_ = key;
-      stopHoldUntil_ = now + STOP_HOLD_MS;
-      return 0;
-    }
-  }
-  return speedPx;
+  return simSpeed_ / METERS_PER_PX;
 }
 
 // ── Prévia GPS ───────────────────────────────────────────────────────────
@@ -348,18 +350,20 @@ void App::updateGps(uint32_t now, FrameView &view) {
 // ── Câmera (cameraRig.js) ────────────────────────────────────────────────
 void App::updateCamera(float dt, float wx, float wz, float dirX, float dirZ, FrameView &view) {
   Vec3 target, look;
-  // Sempre atrás do carro; na prévia GPS (parado na PARE ou num ponto) sobe e mostra o
-  // caminho até a próxima placa, quase de cima, e volta sozinha quando o carro segue.
+  // Sempre atrás do carro; parado numa placa (PARE ou ponto) abre e mostra a pista inteira,
+  // quase de cima, segura essa vista enquanto o carro espera e volta sozinha quando ele segue.
+  // Só a câmera muda: a simulação e a missão continuam de onde estavam.
   bool framing = gpsActive_;
   if (framing) {
-    // Vista de cima do caminho inteiro carro -> próxima placa, encaixada na área livre da tela
+    // Vista de cima da pista toda (todos os trechos), encaixada na área livre da tela
     // (à direita do cartão da missão e acima do cartão da prévia). Norte da pista para cima.
     float minX = 1e9f, maxX = -1e9f, minZ = 1e9f, maxZ = -1e9f;
-    for (int i = 0; i <= 24; i++) {
-      Vec2 p = plan_.line.sample(gpsS0_ + (gpsS1_ - gpsS0_) * i / 24.0f).pos;
-      minX = std::min(minX, p.x), maxX = std::max(maxX, p.x), minZ = std::min(minZ, p.y), maxZ = std::max(maxZ, p.y);
+    for (int e = 0; e < network_.edgeCount(); e++) {
+      for (const Vec2 &p : network_.edge(e).line.pts) {
+        minX = std::min(minX, p.x), maxX = std::max(maxX, p.x), minZ = std::min(minZ, p.y), maxZ = std::max(maxZ, p.y);
+      }
     }
-    const float margin = 1.2f;   // m
+    const float margin = 1.0f;   // m: meia largura da faixa + folga
     float w = (maxX - minX) * PX_TO_WORLD + 2 * margin, h = (maxZ - minZ) * PX_TO_WORLD + 2 * margin;
     // área livre: x 176..470 e y 44..232 de 480x320
     const float safeW = 0.61f, safeH = 0.59f, safeX = 0.173f, safeY = -0.069f, aspect = 1.5f;
@@ -519,7 +523,7 @@ void App::update(uint32_t now, FrameView &view) {
     last_ = now;
     replan(true, &CAR_START, now);
   }
-  float dt = std::min(0.1f, (now - last_) / 1000.0f);
+  float dt = std::min(MAX_DT, (now - last_) / 1000.0f);
   last_ = now;
   updateLink(now);
 
@@ -546,27 +550,33 @@ void App::update(uint32_t now, FrameView &view) {
     float speedPx = simSpeedPx(now);
     speedMs = speedPx * METERS_PER_PX;
     if (speedPx > 0) {
-      s_ += speedPx * dt;
+      float next = s_ + speedPx * dt;
+      // PARE no caminho deste quadro: para nela (por cruzamento, vale para qualquer velocidade e fps)
+      if (const PlanEvent *stop = nextEvent(EventType::Stop, next - s_ + 8)) {
+        int key = (int)plan_.length * 8192 + (int)stop->s;
+        if (stoppedAtKey_ != key) {
+          stoppedAtKey_ = key;
+          stopHoldUntil_ = now + STOP_HOLD_MS;
+          next = std::max(s_, std::min(next, stop->s - 8));
+        }
+      }
+      s_ = next;
       int seen = 0;
       for (const PlanEvent &e : plan_.events) {
         if (e.type != EventType::Point || !e.target) continue;
         if (seen++ < planConsumed_) continue;
-        if (s_ >= e.s) consumePoint(now); else break;
+        if (s_ < e.s) break;
+        s_ = e.s + 0.5f;   // para na placa, sem passar dela
+        consumePoint(now);
+        break;
       }
       if (s_ >= plan_.length) {
-        // Volta completa: missão cumprida para na largada; sem missão, segue em voltas
+        // Volta completa: missão cumprida para na linha de chegada e fica lá (percurso finalizado);
+        // sem missão, segue em voltas. Missão nova pela serial ({"panel":{"sim_route":...}}) sai dali.
         bool hadMission = !planQueue_.empty();
         replan(false, &LAP_START, now);
-        if (hadMission && currentQueue().empty()) {
-          finishMission();
-          missionDoneAt_ = now;
-        }
+        if (hadMission && currentQueue().empty()) finishMission();
       }
-    } else if (missionDone_ && now - missionDoneAt_ > SIM_RESTART_MS) {
-      simDone_ = 0;
-      stoppedAtKey_ = -1;
-      stopHoldUntil_ = pointHoldUntil_ = 0;
-      replan(true, &CAR_START, now);
     }
   }
 
@@ -578,9 +588,11 @@ void App::update(uint32_t now, FrameView &view) {
   heading_ = headingReady_ ? angleLerp(heading_, yaw, 1 - expf(-dt * 14)) : yaw;
   headingReady_ = true;
   float dirX = cosf(heading_), dirZ = sinf(heading_);
-  // Posição: acompanha direto; saltos de correção deslizam em ~0,3 s
+  // Posição: acompanha direto; saltos de correção deslizam em ~0,3 s. O avanço normal do quadro
+  // não conta como salto (com quadros lentos ele passa de SNAP_DISTANCE_PX e o carro ficava para trás).
   float jump = shownReady_ ? hypotf(p.pos.x - shownX_, p.pos.y - shownY_) : 0;
-  float follow = shownReady_ ? (jump > SNAP_DISTANCE_PX ? 1 - expf(-dt * 9) : 1) : 1;
+  float expected = speedMs / METERS_PER_PX * dt;
+  float follow = shownReady_ ? (jump > expected + SNAP_DISTANCE_PX ? 1 - expf(-dt * 9) : 1) : 1;
   shownX_ += (p.pos.x - shownX_) * follow;
   shownY_ += (p.pos.y - shownY_) * follow;
   shownReady_ = true;

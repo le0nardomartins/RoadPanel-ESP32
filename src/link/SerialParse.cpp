@@ -64,7 +64,7 @@ ParseResult parseSerialLine(const char *line, VehicleData &data, PanelCommand &c
   JsonObjectConst raw = doc.as<JsonObjectConst>();
   if (raw.isNull()) return ParseResult::Error;
 
-  // Comandos do painel: {"panel": {"source": "sim"|"serial", "plan": "car"|"shortest"}}
+  // Comandos do painel: {"panel": {"source": "sim"|"serial", "plan": "car"|"shortest", "sim_route": "B → A"}}
   JsonObjectConst panel = raw["panel"];
   if (!panel.isNull()) {
     command = PanelCommand{};
@@ -74,6 +74,10 @@ ParseResult parseSerialLine(const char *line, VehicleData &data, PanelCommand &c
     if (!strcmp(source, "serial") || !strcmp(source, "live")) command.source = 1;
     if (!strcmp(plan, "shortest")) command.planMode = 0;
     if (!strcmp(plan, "car")) command.planMode = 1;
+    if (panel["sim_route"].is<const char *>()) {
+      command.hasSimRoute = true;
+      command.simRoute = parseRoute(panel["sim_route"].as<const char *>());
+    }
     return ParseResult::Command;
   }
 

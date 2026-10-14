@@ -43,6 +43,7 @@ class Localizer {
   bool wheelsSeen_ = false;
   float gateFloor_ = -INFINITY;   // portões até aqui já foram confirmados
   float overflow_ = 0;
+  float behind_ = 0;              // px que um marco mandou recuar, pagos pela odometria (sem ré)
   const PlanEvent *waiting_ = nullptr;   // portão em que a estimativa está esperando
   char waitingPoint_ = 0;
   EventType waitingType_ = EventType::Detour;

@@ -13,14 +13,17 @@
 // Clock do SPI. 40 MHz funciona em quase todo ST7796S; com fios curtos tente 80 MHz (dobra o fps
 // de envio). Se aparecer lixo/cores erradas, volte para 40 ou 27 MHz.
 #define TFT_SPI_HZ 40000000
-#define TFT_ROTATION 1       // paisagem (480 x 320)
-#define TFT_INVERT true      // igual ao invertDisplay(true) da versão anterior
+#define TFT_ROTATION 3       // paisagem (480 x 320) de cabeça para baixo (display invertido no carro); 1 = normal
+#define TFT_INVERT false     // true deixava as cores invertidas (amarelo->azul, preto->branco)
 #define TFT_BGR false        // vermelho e azul trocados? mude para true
 
 // ── Serial com o carro ──
 // Mesmo formato do /api/vehicle_info (um JSON por linha) ou o antigo "velocidade,servo".
 #define SERIAL_BAUD 115200
 #define SERIAL_LINE_MAX 3072
+
+// ── Simulação (sem carro na serial) ──
+#define SIM_SPEED_MS 1.0f    // velocidade do carro simulado em m/s (o carro real anda ~0,4)
 
 // ── Desempenho ──
 #define RENDER_DUAL_CORE 1   // desenha faixas pares no núcleo 1 e ímpares no núcleo 0

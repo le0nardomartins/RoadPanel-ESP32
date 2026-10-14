@@ -30,6 +30,8 @@ struct VehicleData {
 struct PanelCommand {
   int source = -1;            // 0 simulação, 1 serial
   int planMode = -1;          // 0 caminho livre, 1 tabela do carro
+  bool hasSimRoute = false;   // missão da simulação, ex.: "BA" (coleta em B, entrega em A)
+  std::string simRoute;
 };
 
 enum class ParseResult : uint8_t { None, Vehicle, Command, Error };

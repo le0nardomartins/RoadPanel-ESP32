@@ -31,13 +31,15 @@ constexpr float SHADOW_HALF = 0.42f * PX / 2; // sombra de contato das ilhas
 constexpr float RIBBON_HALF = 0.66f * PX / 2;
 constexpr float GPS_HALF = 0.44f * PX / 2;
 constexpr float RIBBON_FADE_M = 34;
-constexpr float STRIP_STEP = 5;               // px entre amostras da fita
+constexpr float STRIP_STEP = 5;               // px entre amostras da fita (perto do chão)
+constexpr float STRIP_STEP_MAX = 24;          // px: na vista de cima da pista inteira
 // Carro (car.js: CAR_SIZE; o modelo 3D é escalado para 0,8 m de largura e 1,2 m de comprimento)
 constexpr float CAR_LEN = 1.2f, CAR_WID = 0.8f;
 constexpr float RAD2DEG = 180.0f / (float)M_PI;
 constexpr float TOP_FROM_DEG = 64;   // acima disso a câmera vê o carro "de cima"
 // Placas (signs.js)
 constexpr float SIGN_SIZE = 0.6f, POST_HEIGHT = 0.9f;
+constexpr float SIGN_NEAR_M = 1.2f;   // mais perto que isso da câmera a placa não é desenhada
 
 inline float clamp01(float v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 inline float smoothstep(float a, float b, float x) {
@@ -131,16 +133,19 @@ void Scene::prepare(const FrameView &view) {
   }
 
   // ── Fita da missão e rota GPS ──
-  ribbon_.clear();
-  gps_.clear();
+  ribbon_.count = 0;
+  gps_.count = 0;
   if (view.plan && view.plan->length > 0) {
     const Polyline &line = view.plan->line;
+    // Câmera alta (vista da pista inteira): 5 px da pista ficam menores que 1 px na tela, então o
+    // passo cresce com a altura (perseguição: câmera a ~3,7 m, passo de 5 px)
+    float step = std::min(STRIP_STEP_MAX, std::max(STRIP_STEP, STRIP_STEP * py_ / 3.7f * 0.6f));
     float s0 = std::max(0.0f, view.s - 15);
     float s1 = std::min({line.length, view.reveal, view.s + RIBBON_FADE_M * PX});
-    if (s1 > s0) buildStrips(ribbon_, line, s0, s1, RIBBON_HALF);
+    if (s1 > s0) buildStrips(ribbon_, line, s0, s1, RIBBON_HALF, step);
     if (view.gpsVisible) {
       float g1 = view.gpsS0 + (view.gpsS1 - view.gpsS0) * view.gpsProgress;
-      if (g1 > view.gpsS0 + 1) buildStrips(gps_, line, view.gpsS0, std::min(g1, line.length), GPS_HALF);
+      if (g1 > view.gpsS0 + 1) buildStrips(gps_, line, view.gpsS0, std::min(g1, line.length), GPS_HALF, step);
       pin_ = project(view.gpsPin.x * INV_PX, 0, view.gpsPin.y * INV_PX);
     }
   }
@@ -148,33 +153,35 @@ void Scene::prepare(const FrameView &view) {
   prepareCar(view);
 }
 
-void Scene::buildStrips(std::vector<Strip> &out, const Polyline &line, float s0, float s1, float half) {
-  int count = std::max(2, (int)ceilf((s1 - s0) / STRIP_STEP) + 1);
-  std::vector<Vec2> pts(count);
-  std::vector<float> ss(count);
-  for (int i = 0; i < count; i++) {
-    ss[i] = std::min(s1, s0 + i * STRIP_STEP);
-    pts[i] = line.sample(ss[i]).pos;
-  }
+void Scene::buildStrips(StripList &out, const Polyline &line, float s0, float s1, float half, float step) {
+  // Nunca passa da capacidade fixa: trecho longo demais alarga o passo
+  step = std::max(step, (s1 - s0) / (MAX_STRIPS - 1));
+  int count = std::max(2, (int)ceilf((s1 - s0) / step) + 1);
+  auto at = [&](int i) { return std::min(s1, s0 + i * step); };
+  // três amostras por vez (atual, próxima, a seguinte), sem vetores temporários
+  Vec2 pi = line.sample(at(0)).pos, pn = line.sample(at(1)).pos;
   Vec2 prevDir{0, 0};
-  out.reserve(out.size() + count);
-  for (int i = 0; i + 1 < count; i++) {
-    Vec2 d = pts[i + 1] - pts[i];
+  for (int i = 0; i + 1 < count && out.count < MAX_STRIPS; i++) {
+    Vec2 pnn = i + 2 < count ? line.sample(at(i + 2)).pos : pn;
+    Vec2 pts[2] = {pi, pn};
+    float si = at(i);
+    pi = pn, pn = pnn;
+    Vec2 d = pts[1] - pts[0];
     float len = length(d);
     if (len < 0.01f) continue;
     Vec2 dir{d.x / len, d.y / len};
     Vec2 nextDir = dir;
     if (i + 2 < count) {
-      Vec2 dn = pts[i + 2] - pts[i + 1];
+      Vec2 dn = pnn - pts[1];
       float ln = length(dn);
       if (ln > 0.01f) nextDir = {dn.x / ln, dn.y / ln};
     }
-    Vec2 m0 = out.empty() || (prevDir.x == 0 && prevDir.y == 0) ? dir : unitBetween({0, 0}, prevDir + dir);
+    Vec2 m0 = out.count == 0 || (prevDir.x == 0 && prevDir.y == 0) ? dir : unitBetween({0, 0}, prevDir + dir);
     Vec2 m1 = unitBetween({0, 0}, dir + nextDir);
     prevDir = dir;
     // caixa na tela pelos 4 cantos (com folga para a ponta da junção)
     Vec2 n{-dir.y * half * 1.15f, dir.x * half * 1.15f};
-    Vec2 corners[4] = {pts[i] + n, pts[i] - n, pts[i + 1] + n, pts[i + 1] - n};
+    Vec2 corners[4] = {pts[0] + n, pts[0] - n, pts[1] + n, pts[1] - n};
     float minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
     bool ok = true;
     for (Vec2 c : corners) {
@@ -183,24 +190,25 @@ void Scene::buildStrips(std::vector<Strip> &out, const Polyline &line, float s0,
       minX = std::min(minX, p.x), maxX = std::max(maxX, p.x), minY = std::min(minY, p.y), maxY = std::max(maxY, p.y);
     }
     if (!ok || maxX < 0 || minX >= SCREEN_W || maxY < 0 || minY >= SCREEN_H) continue;
-    Strip s;
-    s.p = pts[i];
+    Strip &s = out.items[out.count];
+    s.p = pts[0];
     s.dir = dir;
     s.m0 = m0;
     s.m1 = m1;
     s.len = len;
-    s.s0 = ss[i];
+    s.s0 = si;
     s.x0 = std::max(0, (int)floorf(minX) - 2);
     s.x1 = std::min(SCREEN_W, (int)ceilf(maxX) + 3);
     s.y0 = std::max(0, (int)floorf(minY) - 2);
     s.y1 = std::min(SCREEN_H, (int)ceilf(maxY) + 3);
-    out.push_back(s);
+    out.count++;
   }
   if (&out == &ribbon_) ribbonHalf_ = half; else gpsHalf_ = half;
 }
 
 void Scene::prepareSigns(const FrameView &view) {
   signs_.clear();
+  signs_.reserve(trackdata::SIGN_COUNT);   // só aloca no 1º quadro, depois reaproveita
   for (int i = 0; i < trackdata::SIGN_COUNT; i++) {
     const SignDef &sign = trackdata::SIGNS[i];
     float X = sign.at.x * INV_PX, Z = sign.at.y * INV_PX;
@@ -229,7 +237,14 @@ void Scene::prepareSigns(const FrameView &view) {
       if (facingDot < 0) hx = -hx, hz = -hz;
     }
     Projected right = project(X + hx * size / 2, center, Z + hz * size / 2);
-    if (!right.ok) continue;
+    Projected left = project(X - hx * size / 2, center, Z - hz * size / 2);
+    if (!right.ok || !left.ok) continue;
+    // Placa encostada na câmera (o carro passando rente a ela, ou a câmera indo para a vista de
+    // cima): a projeção estoura e ela vira uma faixa cortando a tela. Some antes disso.
+    float nearest = std::min(std::min(std::min(c.depth, ground.depth), std::min(postEnd.depth, bottom.depth)),
+                             std::min(right.depth, left.depth));
+    if (nearest < SIGN_NEAR_M) continue;
+    if (fabsf(right.x - left.x) > SCREEN_W / 3.0f || fabsf(ground.y - c.y) > SCREEN_H) continue;
     SignDraw d;
     switch (sign.kind) {
       case SignKind::Point:
@@ -445,7 +460,7 @@ __attribute__((noinline)) float gpsShade(float vt, float side, float aaSide, flo
 
 }  // namespace
 
-void Scene::drawStrips(Canvas &c, const std::vector<Strip> &strips, bool gps) {
+void Scene::drawStrips(Canvas &c, const StripList &strips, bool gps) {
   const FrameView &v = *view_;
   float half = gps ? gpsHalf_ : ribbonHalf_;
   float carS = v.s * INV_PX, reveal = v.reveal * INV_PX;

@@ -5,6 +5,7 @@
 
 #include <string>
 
+#include "../Config.h"
 #include "../link/VehicleData.h"
 #include "../track/Localizer.h"
 #include "../track/Planner.h"
@@ -74,6 +75,8 @@ class App {
   /** JSON sem "hud": o remetente está no ar mas o main.py ainda não publicou. */
   void onWaiting(uint32_t now);
   void onCommand(const PanelCommand &command);
+  /** Simulação: troca a missão ("AC", "BA"...) e segue dali, sem voltar à partida. */
+  void setSimRoute(const std::string &route, uint32_t now);
 
   /** Um quadro: atualiza tudo e preenche view. */
   void update(uint32_t now, FrameView &view);
@@ -94,7 +97,7 @@ class App {
   void applyServerRoute(const std::string &next, const std::string &raw, uint32_t now);
   void setSource(Source source, uint32_t now, bool byUser = false);
   void finishMission();
-  float simSpeedPx(uint32_t now);
+  float simSpeedPx(uint32_t now) const;
   const PlanEvent *nextEvent(EventType type, float maxPx) const;
   void arrivedAtPoint(char point, const char *role, uint32_t now);
   void updateLink(uint32_t now);
@@ -123,9 +126,8 @@ class App {
   bool headingReady_ = false;
   float heading_ = 0;
   bool missionDone_ = false;
-  uint32_t missionDoneAt_ = 0;
   // Simulação
-  float simSpeed_ = 0.4f;
+  float simSpeed_ = SIM_SPEED_MS;
   std::string simRoute_ = "AC";  // na prova vêm 2 dos 3 pontos: coleta no 1º, entrega no último
   int simDone_ = 0;
   uint32_t pointHoldUntil_ = 0;
