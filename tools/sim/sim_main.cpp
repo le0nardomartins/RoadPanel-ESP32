@@ -480,10 +480,22 @@ extern "C" __declspec(dllexport) int roadpanel_sim(const char *out) {
     uint32_t lastSerial = 0, stopUntil = 0, lightUntil = 0, detourUntil = 0;
     size_t nextEvent = 0;
     int backward = 0, confirmed = 0, wrongWay = 0;
+    // Trava no ponto (point_stop_latched do main.py): parado até o botão RUN (contador de apertos)
+    bool latched = false;
+    uint32_t latchUntil = 0;
+    int presses = 0, waitSeen = 0, latchMoving = 0;
+    bool renderedWait = false;
+    // Capturas para a pasta screenshots (só na missão A -> C)
+    const bool shots = strcmp(mission, "AC") == 0;
+    bool shotGoing = false, shotLeaving = false, shotWaitC = false;
     float maxJump = 0, lastX = NAN, lastY = NAN;
     double ts = 0;
     for (uint32_t now = 1000; now < 1000 + 400000 && sTrue < truth.length; now += STEP_MS) {
-      bool stopped = now < stopUntil;
+      if (latched && now >= latchUntil) {
+        latched = false;
+        presses++;   // alguém apertou o botão RUN do carro
+      }
+      bool stopped = now < stopUntil || latched;
       if (!stopped) sTrue += 0.40f / PX_TO_M * STEP_MS / 1000.0f;
       // Marcos que o carro verdadeiro vê ao passar (com a mesma antecedência do Localizer)
       while (nextEvent < truth.events.size()) {
@@ -497,6 +509,8 @@ extern "C" __declspec(dllexport) int roadpanel_sim(const char *out) {
         if (e.type == EventType::Point && e.target && !route.empty() && route[0] == e.point) {
           route.erase(0, 1);   // o carro confirmou o ponto: nav.route encolhe
           confirmed++;
+          latched = true;      // e trava ali até o botão RUN
+          latchUntil = now + 2000;
         }
         nextEvent++;
       }
@@ -508,12 +522,40 @@ extern "C" __declspec(dllexport) int roadpanel_sim(const char *out) {
         d.routeText = route;
         d.running = true;
         d.speed = stopped ? 0 : 0.50f;
-        d.stopActive = stopped;
+        d.pwm = stopped ? 0 : 120;
+        d.runPresses = presses;
+        d.battery = 84;
+        d.batteryState = 3;   // descarregando
+        d.controlMode = "AUTOMÁTICO";
+        d.clockMinutes = 14 * 60 + 32;
+        d.stopActive = now < stopUntil;   // placa PARE (a trava no ponto não liga stop_active)
         d.trafficLight = now < lightUntil ? 2 : -1;
         d.rightDetour = now < detourUntil;
         app->onVehicleData(d, now);
       }
       app->update(now, view);
+      if (latched && now > latchUntil - 1000) {
+        // já com a rota encolhida no painel: tem que estar esperando o botão, parado
+        if (view.hud.missionWaitingAt >= 0) waitSeen++;
+        if (strcmp(view.hud.speed, "0,00") != 0) latchMoving++;
+        if (strcmp(mission, "AC") == 0 && confirmed == 1 && !renderedWait) {
+          render(view, now, "ao_vivo_AC_aguardando_botao");
+          render(view, now, "tela_17_serial_parado_na_coleta_aguardando_RUN");
+          renderedWait = true;
+        }
+        if (shots && confirmed == 2 && !shotWaitC) {
+          render(view, now, "tela_19_serial_parado_na_entrega_aguardando_RUN");
+          shotWaitC = true;
+        }
+      }
+      if (shots && !shotGoing && confirmed == 0 && now >= 7000) {
+        render(view, now, "tela_16_serial_rumo_a_coleta");
+        shotGoing = true;
+      }
+      if (shots && !shotLeaving && confirmed == 1 && !latched && now >= latchUntil + 2500) {
+        render(view, now, "tela_18_serial_RUN_apertado_rumo_a_entrega");
+        shotLeaving = true;
+      }
       if (view.plan->serial == lastSerial && view.s < lastS - 0.01f) backward++;
       lastSerial = view.plan->serial;
       lastS = view.s;
@@ -532,7 +574,80 @@ extern "C" __declspec(dllexport) int roadpanel_sim(const char *out) {
     check(view.hud.missionDone == 2, "%spainel não registrou coleta e entrega (%.0f)", "", view.hud.missionDone);
     check(backward == 0, "%scarro deu ré na tela em %.0f quadros", "", backward);
     check(wrongWay == 0, "%scontramão ao vivo em %.0f quadros", "", wrongWay);
+    check(waitSeen > 0, "%spainel não esperou o botão RUN no ponto", "");
+    check(latchMoving == 0, "%scarro andou na tela travado no ponto (%.0f quadros)", "", latchMoving);
+    check(view.hud.missionWaitingAt < 0, "%spainel continuou esperando depois do botão RUN", "");
     if (strcmp(mission, "AC") == 0) render(view, 0, "ao_vivo_AC_fim");
+    delete app;
+  }
+
+  // Carga da bateria: fumaça verde nas bordas (2 s) e ondas lentas na malha de pontos (9 s)
+  {
+    printf("Carga da bateria (onda + fumaça)\n");
+    App *app = new App();
+    FrameView view;
+    uint32_t now = 1000;
+    for (; now < 4000; now += STEP_MS) app->update(now, view);   // anda um pouco
+    PanelCommand charge;
+    charge.charge = true;
+    app->onCommand(charge);
+    uint32_t start = now;
+    bool smoke = false, wave = false, ended = false;
+    for (; now < start + 10500; now += STEP_MS) {
+      app->update(now, view);
+      uint32_t t = now - start;
+      if (view.smokeT >= 0) smoke = true;
+      if (view.chargeT >= 0) wave = true;
+      if (t > 9200 && view.chargeT < 0 && view.smokeT < 0) ended = true;
+      if (t >= 600 && t < 600 + STEP_MS) render(view, now, "carga_fumaca_0600ms");
+      if (t >= 3000 && t < 3000 + STEP_MS) render(view, now, "carga_ondas_3s");
+    }
+    check(smoke && wave && ended, "%sonda/fumaça da carga não tocaram ou não acabaram", "");
+    delete app;
+  }
+
+  // Capturas: bateria começa a carregar (battery_state 3 -> 1) com o carro parado, dado pela serial
+  {
+    printf("Capturas: carga da bateria pela serial\n");
+    App *app = new App();
+    FrameView view;
+    double ts = 0;
+    bool smokeShot = false, waveShot = false;
+    for (uint32_t now = 1000; now < 12000; now += STEP_MS) {
+      if (now % 99 < STEP_MS) {
+        VehicleData d;
+        ts += 0.1;
+        d.ts = ts;
+        d.running = false;
+        d.battery = 37;
+        d.batteryState = now < 4000 ? 3 : 1;   // carregador ligado aos 4 s
+        d.controlMode = "AUTOMÁTICO";
+        d.clockMinutes = 14 * 60 + 40;
+        app->onVehicleData(d, now);
+      }
+      app->update(now, view);
+      if (!smokeShot && now >= 4700) render(view, now, "tela_20_serial_carregando_fumaca_nas_bordas"), smokeShot = true;
+      if (!waveShot && now >= 7200) render(view, now, "tela_21_serial_carregando_ondas_verdes"), waveShot = true;
+    }
+    delete app;
+  }
+  // Capturas: simulação com 3 pontos (coleta e entrega alternam, como no navigation.py)
+  {
+    printf("Capturas: simulação A -> B -> C\n");
+    App *app = new App();
+    FrameView view;
+    app->setSimRoute("ABC", 1000);
+    bool first = false, gps = false;
+    uint32_t gpsAt = 0;   // espera a câmera abrir a vista da pista (~1,5 s)
+    for (uint32_t now = 1000; now < 120000 && !gps; now += STEP_MS) {
+      app->update(now, view);
+      if (!first && now >= 3000) render(view, now, "tela_22_simulacao_tres_pontos_alternados"), first = true;
+      if (!gpsAt && view.hud.gps && !view.hud.gpsStop) gpsAt = now;
+      if (gpsAt && now >= gpsAt + 1500) {
+        render(view, now, "tela_23_simulacao_chegou_na_coleta_gps");
+        gps = true;
+      }
+    }
     delete app;
   }
 

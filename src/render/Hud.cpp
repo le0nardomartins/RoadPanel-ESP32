@@ -19,6 +19,9 @@ constexpr Rgb ROUTE_STRONG = hex(0x1f5fd8);
 constexpr Rgb LIVE = hex(0x0f8a52);
 constexpr Rgb LIVE_DOT = hex(0x12b36a);
 constexpr Rgb SIM = hex(0xa85f00);
+constexpr Rgb WAIT = hex(0xffb21a);       // --sim-dot: parada travada esperando o botão RUN
+constexpr Rgb CHARGE = hex(0x12d97a);     // onda de carga
+constexpr Rgb LOW = hex(0xff3b30);
 constexpr Rgb STOP = hex(0xc4122f);
 constexpr Rgb WHITE = hex(0xffffff);
 constexpr Rgb LAMP_RED = hex(0xe5132b);
@@ -217,10 +220,17 @@ int Hud::guidePanel(Canvas &c, const HudView &h, uint32_t nowMs) {
     y += 22;
   }
   for (int i = 0; i < points; i++) {
-    bool done = i < h.missionDone, current = i == h.missionDone;
+    // Parada consumida com o carro ainda travado nela (point_stop_latched até o botão RUN)
+    bool waiting = i == h.missionWaitingAt;
+    bool done = i < h.missionDone && !waiting, current = i == h.missionDone && h.missionWaitingAt < 0;
     float cx = PANEL_X + 12, cy = y + 1;
     char letter[2] = {h.missionAll[i], 0};
-    if (current) {
+    if (waiting) {
+      c.roundRect(cx - 3, cy - 3, 30, 30, 11, WAIT, 70);   // halo
+      c.roundRect(cx, cy, 24, 24, 8, WAIT);
+      int lw = Canvas::textWidth(fonts::letter, letter);
+      c.text(fonts::letter, (int)cx + 12 - lw / 2, (int)cy + 18, letter, INK);
+    } else if (current) {
       c.roundRect(cx, cy, 24, 24, 8, ROUTE_STRONG);
       int lw = Canvas::textWidth(fonts::letter, letter);
       c.text(fonts::letter, (int)cx + 12 - lw / 2, (int)cy + 18, letter, WHITE);
@@ -232,9 +242,15 @@ int Hud::guidePanel(Canvas &c, const HudView &h, uint32_t nowMs) {
       int lw = Canvas::textWidth(fonts::letter, letter);
       c.text(fonts::letter, (int)cx + 12 - lw / 2, (int)cy + 18, letter, INK2);
     }
-    const char *role = roleName(i, points);
-    std::string text = done ? std::string(role) + " " + letter : role;
-    c.text(fonts::title, (int)cx + 32, (int)cy + 17, text.c_str(), done ? INK3 : INK);
+    const char *role = roleName(i < (int)h.missionRoles.size() ? h.missionRoles[i] : 0);
+    if (waiting) {
+      // Papel em cima, "aguardando" embaixo (o cartão é estreito)
+      c.text(fonts::title, (int)cx + 32, (int)cy + 11, role, INK);
+      c.text(fonts::micro, (int)cx + 32, (int)cy + 24, "AGUARDANDO RUN", SIM, 255, 1);
+    } else {
+      std::string text = done ? std::string(role) + " " + letter : role;
+      c.text(fonts::title, (int)cx + 32, (int)cy + 17, text.c_str(), done ? INK3 : INK);
+    }
     y += 30;
   }
   if (!h.warning.empty()) {
@@ -268,8 +284,26 @@ void Hud::metrics(Canvas &c, const HudView &h) {
     int cw = widths[i];
     if (i) c.fillRect(x, METRICS_Y + 9, 1, METRICS_H - 18, INK, LINE_ALPHA);
     c.text(fonts::micro, x + 12, METRICS_Y + 15, cells[i].label, INK3, 255, 1);
-    std::string v = fit(fonts::title, *cells[i].value, cw - 20);
-    c.text(fonts::title, x + 12, METRICS_Y + 32, v.c_str(), INK);
+    int vx = x + 12;
+    Rgb ink = INK;
+    if (i == 2) {
+      // Bateria: raio verde carregando/carregada, vermelho com bateria baixa (car.telemetry.battery_state)
+      bool charge = h.batteryState == 1 || h.batteryState == 2;
+      if (charge) {
+        // Raio: dois triângulos (metade de cima e de baixo)
+        float bx = (float)vx, by = METRICS_Y + 19;
+        const float top[6] = {bx + 7, by, bx + 0.5f, by + 8, bx + 6, by + 8};
+        const float bottom[6] = {bx + 3, by + 14, bx + 9.5f, by + 6, bx + 4, by + 6};
+        c.convex(top, 3, CHARGE);
+        c.convex(bottom, 3, CHARGE);
+        vx += 13;
+        ink = LIVE;
+      } else if (h.batteryState == 4) {
+        ink = LOW;
+      }
+    }
+    std::string v = fit(fonts::title, *cells[i].value, cw - 20 - (vx - x - 12));
+    c.text(fonts::title, vx, METRICS_Y + 32, v.c_str(), ink);
     x += cw;
   }
 }

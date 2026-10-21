@@ -78,6 +78,7 @@ ParseResult parseSerialLine(const char *line, VehicleData &data, PanelCommand &c
       command.hasSimRoute = true;
       command.simRoute = parseRoute(panel["sim_route"].as<const char *>());
     }
+    command.charge = truthy(panel["charge"]);
     return ParseResult::Command;
   }
 
@@ -105,6 +106,10 @@ ParseResult parseSerialLine(const char *line, VehicleData &data, PanelCommand &c
   d.servo = (float)num(either(cmd["servo"], hud["servo"]), 90);
   d.speed = (float)num(telemetry["speed"], 0);
   d.battery = (float)num(telemetry["battery"], NAN);
+  d.batteryState = (int)num(telemetry["battery_state"], -1);
+  d.runPresses = (int)num(telemetry["run_button_presses"], -1);
+  d.runButton = truthy(telemetry["run_button"]);
+  d.missionState = (int)num(cmd["mission_state"], -1);
   d.proxLeft = (int)num(telemetry["left"], 0);
   d.proxFrontLeft = (int)num(telemetry["f_left"], 0);
   d.proxFrontRight = (int)num(telemetry["f_right"], 0);

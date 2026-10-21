@@ -31,9 +31,12 @@ struct HudView {
   char maneuverDistance[16] = "--";
   uint32_t maneuverChangedAt = 0;       // para a transição do cartão
   std::string missionAll;               // pontos na ordem, ex.: "AC"
+  std::string missionRoles;             // papel de cada ponto: 'C' coleta, 'E' entrega
   int missionDone = 0;
+  int missionWaitingAt = -1;            // parada consumida com o carro travado nela (botão RUN)
   bool missionReceived = false;
   std::string pwm = "--", servo = "--", battery = "--", mode = "--";
+  int batteryState = -1;                // 0 sem corrente, 1 carregando, 2 carregada, 3 descarregando, 4 baixa
   std::string warning;                  // rota inalcançável
   std::string estimate;                 // "Posição estimada…" (modo real)
   bool hazard = false;
@@ -63,8 +66,17 @@ struct FrameView {
   float gpsS0 = 0, gpsS1 = 0, gpsProgress = 0, gpsOpacity = 0;
   Vec2 gpsPin{0, 0};
   int light = -1;
+  // Onda de carga (bateria começou a carregar): anéis verdes saindo do carro na malha de pontos
+  float chargeT = -1;                   // s desde o início; < 0 = sem onda
+  Vec2 chargeOrigin{0, 0};              // px da pista
+  // Fumaça verde nas bordas da tela nos primeiros 2 s da carga
+  float smokeT = -1;                    // s desde o início; < 0 = sem fumaça
   HudView hud;
 };
+
+// Onda verde: 9 s de pulsos lentos; fumaça nas bordas: 2 s (iguais ao painel web)
+constexpr float CHARGE_WAVE_S = 9.0f;
+constexpr float CHARGE_SMOKE_S = 2.0f;
 
 class App {
  public:
@@ -84,9 +96,12 @@ class App {
  private:
   struct MissionView {
     std::string all;
+    std::string roles;   // papel de cada ponto de all
     int doneCount;
     std::string raw;
   };
+  /** Papel do próximo ponto `point` ainda não concluído (0 se não está na missão). */
+  static char pendingRole(const MissionView &mission, char point);
 
   std::string currentQueue() const;
   MissionView missionView() const;
@@ -94,12 +109,16 @@ class App {
   void replan(bool reveal, const Location *from, uint32_t now);
   bool needsReplan() const;
   void consumePoint(uint32_t now);
-  void applyServerRoute(const std::string &next, const std::string &raw, uint32_t now);
+  void applyServerRoute(const std::string &next, const std::string &raw, int missionState, uint32_t now);
   void setSource(Source source, uint32_t now, bool byUser = false);
   void finishMission();
   float simSpeedPx(uint32_t now) const;
   const PlanEvent *nextEvent(EventType type, float maxPx) const;
-  void arrivedAtPoint(char point, const char *role, uint32_t now);
+  void arrivedAtPoint(char point, char role, bool waitButton, uint32_t now);
+  void syncRoles(int missionState);
+  void updateAwaitButton(uint32_t now);
+  void releaseButtonWait();
+  void startCharge(uint32_t now);
   void updateLink(uint32_t now);
   void updateGps(uint32_t now, FrameView &view);
   void updateCamera(float dt, float wx, float wz, float dirX, float dirZ, FrameView &view);
@@ -132,12 +151,27 @@ class App {
   int simDone_ = 0;
   uint32_t pointHoldUntil_ = 0;
   char arrivalPoint_ = 0;
-  const char *arrivalRole_ = "Ponto";
+  char arrivalRole_ = 0;
   uint32_t stopHoldUntil_ = 0;
   int stoppedAtKey_ = -1;
+  // Espelho do point_stop_latched do main.py: parado no ponto até o botão RUN do carro
+  struct AwaitButton {
+    bool active = false;
+    int presses = -1;          // contador de apertos ao chegar (-1 = ainda sem contador)
+    bool sawStopped = false;   // run desligado durante a espera (point_stop_saw_stopped)
+    uint32_t at = 0;
+  } await_;
   // Serial
   std::string serverRoute_, serverRaw_, liveDone_;
+  std::string serverRoles_, liveDoneRoles_;   // papéis ('C'/'E'), como nav.mission_state
   int localConsumed_ = 0;
+  // Onda de carga
+  bool batteryKnown_ = false;   // já veio uma resposta (abrir já carregando não dispara)
+  int batteryPrev_ = -1;
+  bool chargePending_ = false;
+  uint32_t chargeStart_ = 0;
+  bool charging_ = false;
+  Vec2 chargeOrigin_{0, 0};
   bool userPickedSource_ = false;
   uint32_t lastOkAt_ = 0, lastTsChangeAt_ = 0;
   bool everOk_ = false;

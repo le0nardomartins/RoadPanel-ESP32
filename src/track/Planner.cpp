@@ -294,24 +294,35 @@ Plan buildPlan(const TrackNetwork &net, Location start, const std::string &queue
   return finishPlan(net, start, edges, targets, unreachable, PlanMode::Shortest);
 }
 
-Role roleAt(int index, int total) {
-  if (index <= 0) return Role::Pickup;
-  if (index >= total - 1) return Role::Delivery;
-  return Role::Pass;
+char roleFromMissionState(int missionState) {
+  if (missionState == 1) return ROLE_PICKUP;
+  if (missionState == 0) return ROLE_DELIVERY;
+  return 0;
 }
 
-const char *roleName(int index, int total) {
-  switch (roleAt(index, total)) {
-    case Role::Pickup: return "Coleta";
-    case Role::Delivery: return "Entrega";
-    default: return "Passagem";
+std::string alternateRoles(int count, char first) {
+  std::string roles;
+  char role = first == ROLE_DELIVERY ? ROLE_DELIVERY : ROLE_PICKUP;
+  for (int i = 0; i < count; i++) {
+    roles += role;
+    role = role == ROLE_PICKUP ? ROLE_DELIVERY : ROLE_PICKUP;
   }
+  return roles;
 }
 
-const char *roleAhead(int index, int total) {
-  switch (roleAt(index, total)) {
-    case Role::Pickup: return "Ponto de coleta à frente";
-    case Role::Delivery: return "Ponto de entrega à frente";
-    default: return "Ponto de passagem à frente";
-  }
+std::string appendRoles(char lastRole, int count) {
+  if (!lastRole) return alternateRoles(count);
+  return alternateRoles(count, lastRole == ROLE_PICKUP ? ROLE_DELIVERY : ROLE_PICKUP);
+}
+
+const char *roleName(char role) {
+  if (role == ROLE_PICKUP) return "Coleta";
+  if (role == ROLE_DELIVERY) return "Entrega";
+  return "Ponto";
+}
+
+const char *roleAhead(char role) {
+  if (role == ROLE_PICKUP) return "Ponto de coleta à frente";
+  if (role == ROLE_DELIVERY) return "Ponto de entrega à frente";
+  return "Ponto da missão à frente";
 }

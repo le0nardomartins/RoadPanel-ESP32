@@ -82,6 +82,8 @@ class Scene {
   void prepareSigns(const FrameView &view);
   void shadeGround(float wx, float wy, float aa, bool carShadow, float &r, float &g, float &b) const;
   void drawStrips(Canvas &c, const StripList &strips, bool gps);
+  /** Fumaça verde nas bordas (2 s ao começar a carregar), por cima da cena e por baixo do HUD. */
+  void drawSmoke(Canvas &c) const;
 
   // Câmera (metros)
   float px_, py_, pz_;          // posição

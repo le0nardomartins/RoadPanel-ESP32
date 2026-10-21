@@ -16,6 +16,13 @@ struct VehicleData {
   float servo = 90;
   float speed = 0;            // m/s (média das rodas)
   float battery = NAN;        // %
+  // car.telemetry.battery_state: 0 sem corrente, 1 carregando, 2 carregada, 3 descarregando,
+  // 4 bateria baixa; -1 sem telemetria
+  int batteryState = -1;
+  // Botão RUN do carro: run_btn é um pulso curto, então o servidor (messaging) conta os apertos
+  int runPresses = -1;        // telemetry.run_button_presses; -1 se o servidor não manda
+  bool runButton = false;     // telemetry.run_button
+  int missionState = -1;      // command.mission_state: 1 coleta, 0 entrega, -1 sem rota/manual
   // Ultrassônicos: 0 livre, 1 longe (~50 cm), 2 perto (~30 cm), 3 crítico (~8 cm)
   int proxLeft = 0, proxFrontLeft = 0, proxFrontRight = 0, proxRight = 0;
   int trafficLight = -1;      // 0 vermelho, 1 amarelo, 2 verde, -1 nenhum
@@ -32,6 +39,7 @@ struct PanelCommand {
   int planMode = -1;          // 0 caminho livre, 1 tabela do carro
   bool hasSimRoute = false;   // missão da simulação, ex.: "BA" (coleta em B, entrega em A)
   std::string simRoute;
+  bool charge = false;        // toca a onda de carga (como "Simular carregamento" do painel web)
 };
 
 enum class ParseResult : uint8_t { None, Vehicle, Command, Error };

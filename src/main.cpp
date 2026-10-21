@@ -169,6 +169,20 @@ static void splash(float progress, const char *text) {
   lcd.endWrite();
 }
 
+// ── Dados do carro (uma linha da serial) ─────────────────────────────────
+static void handleLine(const char *text, uint32_t now) {
+  VehicleData data;
+  PanelCommand command;
+  switch (parseSerialLine(text, data, command)) {
+    case ParseResult::Vehicle: app.onVehicleData(data, now); break;
+    case ParseResult::Command:
+      app.onCommand(command);
+      break;
+    case ParseResult::None: if (*text) app.onWaiting(now); break;
+    default: break;   // linha inválida: ignora (nunca trava o painel)
+  }
+}
+
 // ── Serial ───────────────────────────────────────────────────────────────
 static char line[SERIAL_LINE_MAX];
 static size_t lineLen = 0;
@@ -184,16 +198,7 @@ static void readSerial(uint32_t now) {
       continue;
     }
     line[lineLen] = 0;
-    if (!lineOverflow) {
-      VehicleData data;
-      PanelCommand command;
-      switch (parseSerialLine(line, data, command)) {
-        case ParseResult::Vehicle: app.onVehicleData(data, now); break;
-        case ParseResult::Command: app.onCommand(command); break;
-        case ParseResult::None: if (lineLen) app.onWaiting(now); break;
-        default: break;   // linha inválida: ignora (nunca trava o painel)
-      }
-    }
+    if (!lineOverflow) handleLine(line, now);
     lineLen = 0;
     lineOverflow = false;
   }

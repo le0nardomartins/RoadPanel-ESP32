@@ -24,6 +24,16 @@ use `SHOW_FPS 1`.
 A vista é sempre de perseguição, atrás do carro. Quando o carro para na PARE ou chega num ponto, a
 câmera sobe sozinha e mostra o caminho até a próxima placa (prévia GPS); depois volta para trás do carro.
 
+## Parada nos pontos (igual ao painel web e ao `main.py`)
+
+Quando `nav.route` perde um ponto, o carro travou nele (`point_stop_latched`). O painel fica parado no
+ponto, com a parada em âmbar ("AGUARDANDO RUN") e "Aperte o botão RUN" no cartão, até: o botão RUN do
+carro (`telemetry.run_button_presses`), o `run` desligado e ligado de novo, o modo manual, ou o carro
+voltar a andar com PWM > 0. Coleta e entrega alternam como em `Navigation.add_point`, corrigidas por
+`command.mission_state`. Quando a bateria começa a carregar (`battery_state` 1), a malha de pontos
+solta ondas verdes por 9 s e as bordas da tela ficam com fumaça verde por 2 s
+(`{"panel":{"charge":true}}` simula).
+
 ## Dados do carro (serial, 115200)
 
 O ESP32 aceita **uma linha por mensagem** em dois formatos:
@@ -38,14 +48,23 @@ O ESP32 aceita **uma linha por mensagem** em dois formatos:
   `time` é opcional (o ESP32 não tem relógio). Os campos ausentes viram padrão, como no `carLink.js`.
 - **Formato antigo** `velocidade_m_s,servo` (ex.: `0.42,90`). Ele só move o carro e não traz missão nem placas.
 
-Sem nada mudar no carro: rode a ponte, que lê a API e manda pela serial.
+### Simulação → modo real (só cabo USB, sem Wi-Fi nem outro sinal sem fio)
 
-```
-pip install pyserial
-python tools/serial_bridge.py --port COM5 --api http://<ip-do-carro>:5000/api
-```
+1. Ligue o ESP32 no PC do carro pelo **cabo USB**. O firmware não liga o rádio (sem Wi-Fi/Bluetooth).
+2. Rode o `main.py` normalmente nesse PC.
+3. No mesmo PC, rode a ponte. Ela acha a porta do ESP32 sozinha e lê a API local (`127.0.0.1`):
+   ```
+   pip install pyserial
+   python tools/serial_bridge.py
+   ```
+   (`--port COM5` fixa a porta; se o cabo sair, ela espera ele voltar e continua.)
+4. Na primeira linha válida o painel troca sozinho de **Simulação** (selo âmbar) para **Ao vivo**
+   (selo verde). Feche a ponte e em 3 s ele mostra "Sem sinal".
 
-Comandos opcionais: `{"panel":{"source":"sim"}}`,
+Para forçar um modo, mande pela mesma serial `{"panel":{"source":"serial"}}` (real) ou
+`{"panel":{"source":"sim"}}` (simulação). Depois de forçado, ele não troca mais sozinho até reiniciar.
+
+Outros comandos opcionais:
 `{"panel":{"plan":"car"}}` (trajetória pela tabela do carro em vez do caminho livre) e
 `{"panel":{"sim_route":"B → A"}}` (missão da simulação: coleta em B, entrega em A; sai de onde o
 carro está).

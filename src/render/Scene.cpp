@@ -67,6 +67,104 @@ inline float bandCoverage(float d, float hw, float aa) {
   return hi > lo ? (hi - lo) / (2 * aa) : 0;
 }
 
+constexpr Rgb CHARGE = hex(0x12d97a);   // onda de carga da bateria (trackMeshes.js: COLORS.charge)
+
+/** exp(-x²) barato (sem expf por pixel): (1 - x²/4)^4, zero a partir de |x| = 2. */
+inline float softBell(float x) {
+  float k = 1 - x * x * 0.25f;
+  if (k <= 0) return 0;
+  k *= k;
+  return k * k;
+}
+
+/** Anel largo e lento que sai do carro e se dissolve ao abrir (fase 0..1). Distâncias em metros. */
+inline float chargeRing(float dist, float phase) {
+  float radius = phase * 20.0f;
+  float front = softBell((dist - radius) * (1 / 1.9f));
+  float wake = smoothstep(radius - 9, radius, dist) * (1 - smoothstep(radius - 0.5f, radius + 1.5f, dist)) * 0.3f;
+  float fade = 1 - smoothstep(0, 1, phase);
+  return (front + wake) * fade * smoothstep(0, 0.08f, phase);
+}
+
+struct ChargeShade {
+  float rings;   // 0..1: brilho dos anéis + foco no carro
+  float tint;    // 0..1: quanto as bolinhas viram verdes
+};
+
+/** Shader da onda de carga do painel web (dotField em trackMeshes.js), em metros. */
+__attribute__((noinline)) ChargeShade chargeShade(float mx, float my, float ox, float oy, float t) {
+  ChargeShade out{0, 0};
+  if (t < 0) return out;
+  out.tint = smoothstep(0, 0.8f, t) * (1 - smoothstep(CHARGE_WAVE_S - 1.6f, CHARGE_WAVE_S, t));
+  float dx = mx - ox, dy = my - oy;
+  float dist2 = dx * dx + dy * dy;
+  if (dist2 > 24.5f * 24.5f) return out;   // além do maior anel + borda: nada a somar
+  float dist = sqrtf(dist2);
+  const float period = 3.2f;
+  float rings = (chargeRing(dist, fractf(t / period)) + 0.55f * chargeRing(dist, fractf(t / period + 0.5f))) * 0.85f;
+  // Foco: halo grande e macio no carro, respirando devagar
+  rings += softBell(dist * (1 / 4.5f)) * (0.75f + 0.25f * fastSin(t * 1.9f));
+  out.rings = clamp01(rings * out.tint);
+  return out;
+}
+
+// ── Fumaça das bordas: ruído verde assado uma vez numa grade pequena (como o chargeSmoke.js) ──
+constexpr int SMOKE_CELL = 8;
+constexpr int SMOKE_GW = SCREEN_W / SMOKE_CELL + 2, SMOKE_GH = SCREEN_H / SMOKE_CELL + 2;
+uint8_t smokeGrid[2][SMOKE_GH][SMOKE_GW];
+bool smokeReady = false;
+
+float smokeHash(int x, int y, int seed) {
+  float n = sinf(x * 127.1f + y * 311.7f + seed * 74.7f) * 43758.5453f;
+  return n - floorf(n);
+}
+
+float smokeNoise(float x, float y, int seed) {
+  int xi = (int)floorf(x), yi = (int)floorf(y);
+  float fx = x - xi, fy = y - yi;
+  fx = fx * fx * (3 - 2 * fx);
+  fy = fy * fy * (3 - 2 * fy);
+  float a = smokeHash(xi, yi, seed), b = smokeHash(xi + 1, yi, seed);
+  float c = smokeHash(xi, yi + 1, seed), d = smokeHash(xi + 1, yi + 1, seed);
+  return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+}
+
+void bakeSmoke() {
+  for (int layer = 0; layer < 2; layer++) {
+    int seed = 11 + layer * 29;
+    for (int gy = 0; gy < SMOKE_GH; gy++) {
+      for (int gx = 0; gx < SMOKE_GW; gx++) {
+        float ex = (gx * SMOKE_CELL) / (float)(SCREEN_W - 1) * 2 - 1;
+        float ey = (gy * SMOKE_CELL) / (float)(SCREEN_H - 1) * 2 - 1;
+        float r = sqrtf((ex / 0.92f) * (ex / 0.92f) + (ey / 0.88f) * (ey / 0.88f));
+        float edge = clamp01((r - 0.5f) / 0.5f);
+        // mesma escala do canvas de 192 px do painel web: 0,045 por px do canvas = 2,5 px de tela
+        float n = 0, amp = 0.55f, freq = 0.045f / 2.5f * SMOKE_CELL;
+        for (int o = 0; o < 3; o++) {
+          n += smokeNoise(gx * freq, gy * freq, seed + o) * amp;
+          amp *= 0.5f;
+          freq *= 2.1f;
+        }
+        float smoke = clamp01((n - 0.28f) * 1.9f);
+        float alpha = std::min(1.0f, edge * edge * (0.25f + smoke * 0.75f) + edge * edge * 0.25f);
+        smokeGrid[layer][gy][gx] = (uint8_t)(alpha * 190);
+      }
+    }
+  }
+  smokeReady = true;
+}
+
+/** Grade da fumaça em (x, y) de tela, bilinear (fora da grade = 0). */
+inline float smokeAt(int layer, float x, float y) {
+  float gx = x * (1.0f / SMOKE_CELL), gy = y * (1.0f / SMOKE_CELL);
+  if (gx < 0 || gy < 0 || gx >= SMOKE_GW - 1 || gy >= SMOKE_GH - 1) return 0;
+  int ix = (int)gx, iy = (int)gy;
+  float fx = gx - ix, fy = gy - iy;
+  const uint8_t *r0 = &smokeGrid[layer][iy][ix], *r1 = &smokeGrid[layer][iy + 1][ix];
+  float top = r0[0] + (r0[1] - r0[0]) * fx, bottom = r1[0] + (r1[1] - r1[0]) * fx;
+  return (top + (bottom - top) * fy) * (1.0f / 255);
+}
+
 }  // namespace
 
 Scene::Projected Scene::project(float X, float Y, float Z) const {
@@ -80,6 +178,7 @@ Scene::Projected Scene::project(float X, float Y, float Z) const {
 
 void Scene::prepare(const FrameView &view) {
   view_ = &view;
+  if (view.smokeT >= 0 && !smokeReady) bakeSmoke();   // uma vez, aqui (núcleo único)
   // ── Câmera ──
   px_ = view.camPos.x, py_ = view.camPos.y, pz_ = view.camPos.z;
   fx_ = view.camLook.x - px_, fy_ = view.camLook.y - py_, fz_ = view.camLook.z - pz_;
@@ -366,6 +465,13 @@ void Scene::shadeGround(float wx, float wy, float aa, bool carShadow, float &r, 
   g = off.g + (LANE.g - off.g) * laneK;
   b = off.b + (LANE.b - off.b) * laneK;
 
+  // Onda de carga: o campo fica levemente verde nos anéis e as bolinhas viram verdes e crescem
+  ChargeShade charge{0, 0};
+  if (region == 0 && view_->chargeT >= 0) {
+    charge = chargeShade(wx * INV_PX, wy * INV_PX, view_->chargeOrigin.x * INV_PX, view_->chargeOrigin.y * INV_PX,
+                         view_->chargeT);
+    if (charge.rings > 0) mixTo(r, g, b, CHARGE, 0.16f * charge.rings * (1 - laneK));
+  }
   // Campo: malha de pontos azuis com faixas de luz passando
   if (region == 0 && d < -aa) {
     float aaM = aa * 2 * INV_PX * 1.2f;
@@ -373,9 +479,10 @@ void Scene::shadeGround(float wx, float wy, float aa, bool carShadow, float &r, 
       float mx = wx * INV_PX, my = wy * INV_PX;
       float cx = fractf(mx * (1 / 0.46f)) - 0.5f, cy = fractf(my * (1 / 0.46f)) - 0.5f;
       float dist2 = (cx * cx + cy * cy) * (0.46f * 0.46f);
-      float outer = 0.035f + aaM;
+      float radius = 0.035f + 0.018f * charge.rings;
+      float outer = radius + aaM;
       if (dist2 < outer * outer) {
-        float dotMask = 1 - smoothstep(0.035f - aaM, outer, sqrtf(dist2));
+        float dotMask = 1 - smoothstep(radius - aaM, outer, sqrtf(dist2));
         float t = view_->time;
         float w1 = smoothstep(0.82f, 1, fastSin(mx * 0.21f + my * 0.08f - t * 0.9f));
         float w2 = smoothstep(0.86f, 1, fastSin(-mx * 0.06f + my * 0.19f - t * 0.6f + 1.7f));
@@ -383,7 +490,12 @@ void Scene::shadeGround(float wx, float wy, float aa, bool carShadow, float &r, 
         float w3 = smoothstep(0.9f, 1, fastSin(sqrtf(ex * ex + ey * ey) * 0.55f - t * 1.1f));
         float glow = clamp01(w1 + w2 * 0.8f + w3 * 0.7f);
         float far = 1 - smoothstep(0.018f, 0.05f, aaM);
-        mixTo(r, g, b, DOT, dotMask * (0.22f + 0.78f * glow) * far);
+        Rgb dot = DOT;
+        if (charge.tint > 0) {
+          dot = {(uint8_t)(DOT.r + (CHARGE.r - DOT.r) * charge.tint), (uint8_t)(DOT.g + (CHARGE.g - DOT.g) * charge.tint),
+                 (uint8_t)(DOT.b + (CHARGE.b - DOT.b) * charge.tint)};
+        }
+        mixTo(r, g, b, dot, dotMask * (0.22f + 0.78f * std::max(glow, charge.rings)) * far);
       }
     }
   }
@@ -577,5 +689,45 @@ void Scene::drawBand(Canvas &c) {
     c.circle(pin_.x, pin_.y - 13, 3.2f, WHITE, a);
     float tri[6] = {pin_.x - 6, pin_.y - 8, pin_.x + 6, pin_.y - 8, pin_.x, pin_.y};
     c.convex(tri, 3, GPS_BLUE, a);
+  }
+  if (v.smokeT >= 0) drawSmoke(c);
+}
+
+/**
+ * Fumaça verde nas bordas nos primeiros 2 s da carga (chargeSmoke.js + styles.css do painel web):
+ * duas camadas de ruído assadas uma vez, derivando em sentidos opostos, só fora da elipse central.
+ */
+void Scene::drawSmoke(Canvas &c) const {
+  if (!smokeReady) return;   // assada no prepare() (as faixas são desenhadas nos dois núcleos)
+  const float t = view_->smokeT;
+  const float p = clamp01(t / CHARGE_SMOKE_S);
+  // smoke-life: 0 -> 1 (18%) -> 0,9 (62%) -> 0
+  float life = p < 0.18f ? smoothstep(0, 0.18f, p)
+               : p < 0.62f ? 1 - 0.1f * smoothstep(0.18f, 0.62f, p)
+                           : 0.9f * (1 - smoothstep(0.62f, 1, p));
+  if (life <= 0.01f) return;
+  // smoke-drift: ±1,5% da tela, com leve zoom (camada b espelhada e no sentido oposto)
+  const float cx = SCREEN_W / 2.0f, cy = SCREEN_H / 2.0f;
+  const float driftX = (p - 0.5f) * 0.03f * SCREEN_W, driftY = (p - 0.5f) * 0.02f * SCREEN_H;
+  const float scaleA = 1 / (1 + 0.04f * p), scaleB = 1 / (1.04f - 0.04f * p);
+  for (int y = c.bandY; y < c.bandY + BAND_H; y++) {
+    // Miolo da tela (elipse sem fumaça): pula de uma vez
+    float ey = (y / (float)(SCREEN_H - 1) * 2 - 1) / 0.88f;
+    float inner = 0.44f * 0.44f - ey * ey;
+    int skip0 = SCREEN_W, skip1 = SCREEN_W;
+    if (inner > 0) {
+      float hw = 0.92f * sqrtf(inner) * (SCREEN_W - 1) / 2;
+      int s0 = (int)(cx - hw) + 1, s1 = (int)(cx + hw);
+      if (s1 > s0) skip0 = s0, skip1 = s1;
+    }
+    float ay = (y - cy - driftY) * scaleA + cy, by = (y - cy + driftY) * scaleB + cy;
+    for (int x = 0; x < SCREEN_W; x++) {
+      if (x == skip0) x = skip1;
+      float a = smokeAt(0, (x - cx - driftX) * scaleA + cx, ay);
+      // camada b espelhada (scaleX(-1)): outra fumaça com o mesmo contorno das bordas
+      float b = smokeAt(1, (cx - x - driftX) * scaleB + cx, by) * 0.7f;
+      float alpha = (a + b * (1 - a)) * life;
+      if (alpha > 0.01f) c.blendPx(x, y, CHARGE, (int)(alpha * 255));
+    }
   }
 }

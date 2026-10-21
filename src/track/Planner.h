@@ -45,8 +45,18 @@ std::string parseRoute(const char *raw);
 Plan buildPlan(const TrackNetwork &network, Location start, const std::string &queue, PlanMode mode,
                int detoursDone = 0);
 
-// ── mission.js: papéis dos pontos (coleta no primeiro, entrega no último) ──
-enum class Role : uint8_t { Pickup, Pass, Delivery };
-Role roleAt(int index, int total);
-const char *roleName(int index, int total);    // "Coleta" | "Passagem" | "Entrega"
-const char *roleAhead(int index, int total);   // "Ponto de coleta à frente" ...
+// ── mission.js: papéis dos pontos, iguais aos de core/navigation.py ──
+// Navigation.add_point alterna mission_state a cada ponto: o primeiro de uma lista vazia é coleta (1),
+// o seguinte entrega (0), e assim por diante; ponto adicionado com a lista cheia continua a partir do
+// último. O carro para em TODOS os pontos (point_stop_latched) até o botão RUN.
+// Papéis guardados como letras numa string, um por ponto: 'C' coleta, 'E' entrega.
+constexpr char ROLE_PICKUP = 'C';
+constexpr char ROLE_DELIVERY = 'E';
+/** command.mission_state (1 coleta, 0 entrega) -> papel; 0 se desconhecido (-1). */
+char roleFromMissionState(int missionState);
+/** count papéis alternados começando em first (espelho de add_point). */
+std::string alternateRoles(int count, char first = ROLE_PICKUP);
+/** Papéis de count pontos adicionados depois de uma lista que termina em lastRole (0 = lista vazia). */
+std::string appendRoles(char lastRole, int count);
+const char *roleName(char role);    // "Coleta" | "Entrega"
+const char *roleAhead(char role);   // "Ponto de coleta à frente" ...
