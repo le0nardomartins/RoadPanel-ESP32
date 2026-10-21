@@ -30,7 +30,19 @@ Quando `nav.route` perde um ponto, o carro travou nele (`point_stop_latched`). O
 ponto, com a parada em âmbar ("AGUARDANDO RUN") e "Aperte o botão RUN" no cartão, até: o botão RUN do
 carro (`telemetry.run_button_presses`), o `run` desligado e ligado de novo, o modo manual, ou o carro
 voltar a andar com PWM > 0. Coleta e entrega alternam como em `Navigation.add_point`, corrigidas por
-`command.mission_state`. Quando a bateria começa a carregar (`battery_state` 1), a malha de pontos
+`command.mission_state`.
+
+Enquanto espera, a tela inteira vira a **tela da carga** (a mesma do painel web, sem voz): céu claro
+com a malha de pontos, uma caixa 3D caindo na caçamba (coleta, azul) ou saindo dela (entrega, verde),
+um toque apertando o botão vermelho e, em letras grandes, **COLOQUE A CARGA** / **RETIRE A CARGA** e
+"E APERTE O BOTÃO ● VERMELHO". Ela entra e sai em 260 ms; aberta, a cena 3D nem é calculada.
+O título usa `src/generated/font_cargo.h` (Saira 700 condensada), gerada por
+`python tools/gen_cargo_font.py` a partir da fonte do painel web (precisa de Pillow, fontTools e brotli).
+
+Na **simulação** o carro também trava em cada ponto até o botão RUN: quem faz o papel dele é o botão
+**BOOT** da placa (GPIO0, `SIM_RUN_PIN` em `Config.h`) ou a linha `{"panel":{"run":true}}` na serial.
+
+Quando a bateria começa a carregar (`battery_state` 1), a malha de pontos
 solta ondas verdes por 9 s e as bordas da tela ficam com fumaça verde por 2 s
 (`{"panel":{"charge":true}}` simula).
 
@@ -75,8 +87,9 @@ Sem dados por 3 s, ele mostra "Sem sinal"; com o `_ts` parado, "Dados parados".
 ## Simulação
 
 O carro simulado anda a `SIM_SPEED_MS` (1,0 m/s, em `src/Config.h`), sempre no sentido da pista
-(mão única). Ao parar numa placa (ponto A/B/C ou PARE) a câmera abre e mostra a pista inteira,
-segura essa vista enquanto o carro espera e volta para trás dele quando ele segue. A simulação não
+(mão única). Na PARE a câmera abre e mostra a pista inteira, segura essa vista enquanto o carro
+espera e volta para trás dele quando ele segue. Nos pontos A/B/C ele abre a tela da carga e só segue
+com o botão BOOT da placa (ou `{"panel":{"run":true}}`). A simulação não
 reinicia: depois da entrega o carro completa a volta, para na linha de chegada e fica em
 "Percurso finalizado" até chegar uma missão nova pela serial.
 

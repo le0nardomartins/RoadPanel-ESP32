@@ -74,6 +74,8 @@ class Canvas {
   /** Contorno de retângulo arredondado (borda de 1 px suave). */
   void roundRectStroke(float x, float y, float w, float h, float r, float width, Rgb c, int alpha = 255);
   void circle(float cx, float cy, float r, Rgb c, int alpha = 255);
+  /** Elipse com borda suave; stroke > 0 desenha só o contorno com essa espessura. */
+  void ellipse(float cx, float cy, float rx, float ry, Rgb c, int alpha = 255, float stroke = 0);
   /** Traço reto com pontas arredondadas e bordas suaves. */
   void line(float x0, float y0, float x1, float y1, float width, Rgb c, int alpha = 255);
   /** Polígono convexo com bordas suaves (pontos em sentido qualquer). */

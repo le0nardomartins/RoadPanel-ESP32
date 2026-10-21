@@ -204,7 +204,26 @@ static void readSerial(uint32_t now) {
   }
 }
 
+// ── Botão RUN da simulação (BOOT da placa) ───────────────────────────────
+// Na simulação o carro trava em cada ponto até o botão RUN, como no painel web; aqui quem faz o
+// papel dele é o BOOT. Solto o pino fica em 1 (pull-up); apertado vai a 0.
+static void readSimRunButton(uint32_t now) {
+#if SIM_RUN_PIN >= 0
+  static bool wasDown = false;
+  static uint32_t changedAt = 0;
+  bool down = digitalRead(SIM_RUN_PIN) == LOW;
+  if (down != wasDown && now - changedAt > 30) {   // 30 ms contra o repique do contato
+    changedAt = now;
+    wasDown = down;
+    if (down) app.pressRunButton();
+  }
+#endif
+}
+
 void setup() {
+#if SIM_RUN_PIN >= 0
+  pinMode(SIM_RUN_PIN, INPUT_PULLUP);
+#endif
   Serial.setRxBufferSize(SERIAL_LINE_MAX * 2);
   Serial.begin(SERIAL_BAUD);
   for (auto &core : buffers)
@@ -237,6 +256,7 @@ void setup() {
 void loop() {
   uint32_t now = millis();
   readSerial(now);
+  readSimRunButton(now);
   drawFrame(now);
 
   // fps (média de 1 s)

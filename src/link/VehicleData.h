@@ -40,6 +40,7 @@ struct PanelCommand {
   bool hasSimRoute = false;   // missão da simulação, ex.: "BA" (coleta em B, entrega em A)
   std::string simRoute;
   bool charge = false;        // toca a onda de carga (como "Simular carregamento" do painel web)
+  bool run = false;           // simulação: aperta o botão RUN (como "Apertar botão RUN" do painel web)
 };
 
 enum class ParseResult : uint8_t { None, Vehicle, Command, Error };

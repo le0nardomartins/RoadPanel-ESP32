@@ -132,6 +132,11 @@ void App::arrivedAtPoint(char point, char role, bool waitButton, uint32_t now) {
   pointHoldUntil_ = now + POINT_HOLD_MS;
 }
 
+void App::pressRunButton() {
+  // No modo real quem solta é o run_btn da telemetria (updateAwaitButton)
+  if (source_ == Source::Sim && await_.active) releaseButtonWait();
+}
+
 void App::releaseButtonWait() {
   if (await_.active) pointHoldUntil_ = 0;
   await_ = AwaitButton{};
@@ -168,7 +173,8 @@ void App::consumePoint(uint32_t now) {
     localConsumed_ += 1;
   } else {
     char role = alternateRoles((int)simRoute_.size())[simDone_];
-    arrivedAtPoint(simRoute_[simDone_], role, false, now);
+    // Como o main.py e o painel web: trava em todo ponto até o botão RUN (na simulação, o BOOT)
+    arrivedAtPoint(simRoute_[simDone_], role, true, now);
     simDone_ += 1;
   }
 }
@@ -289,6 +295,7 @@ void App::onCommand(const PanelCommand &command) {
   if (command.source >= 0) setSource(command.source ? Source::Live : Source::Sim, last_, true);
   if (command.hasSimRoute) setSimRoute(command.simRoute, last_);
   if (command.charge) chargePending_ = true;
+  if (command.run) pressRunButton();
   if (command.planMode >= 0) {
     PlanMode mode = command.planMode ? PlanMode::Car : PlanMode::Shortest;
     if (mode != planMode_) {
@@ -598,7 +605,7 @@ void App::updateHud(uint32_t now, float speedMs, FrameView &view) {
                            liveData_.batteryState <= 4 ? liveData_.batteryState : -1;
   if (charging_ && h.batteryState < 0) h.batteryState = BATTERY_CHARGING;
   if (source_ == Source::Sim) {
-    h.mode = missionDone_ ? "Finalizado" : now < stopHoldUntil_ ? "Parado na placa" : "Simulando";
+    h.mode = missionDone_ ? "Finalizado" : await_.active ? "No ponto" : now < stopHoldUntil_ ? "Parado na placa" : "Simulando";
   } else if (data && await_.active) {
     h.mode = "No ponto";
   } else if (data) {
@@ -762,5 +769,30 @@ void App::update(uint32_t now, FrameView &view) {
     view.reveal = 1e9f;
   }
   updateHud(now, speedMs, view);
+  updateCargo(now);
   view.hud = hud_;
+}
+
+/**
+ * Tela da carga (todo quadro, não no ritmo do HUD): abre ao travar no ponto esperando o botão
+ * RUN e sai pelo mesmo caminho quando ele solta, em CARGO_FADE_MS.
+ */
+void App::updateCargo(uint32_t now) {
+  HudView &h = hud_;
+  uint32_t dt = cargoAt_ ? now - cargoAt_ : 0;
+  cargoAt_ = now;
+  if (await_.active && !cargoShown_) {
+    cargoShown_ = true;
+    if (cargoOpen_ <= 0) cargoSince_ = now;
+    h.cargoRole = arrivalRole_ == ROLE_DELIVERY ? ROLE_DELIVERY : ROLE_PICKUP;
+    h.cargoPoint = arrivalPoint_;
+    h.cargoSim = source_ == Source::Sim;
+  } else if (!await_.active) {
+    cargoShown_ = false;
+  }
+  float step = (float)dt / CARGO_FADE_MS;
+  cargoOpen_ = cargoShown_ ? std::min(1.0f, cargoOpen_ + step) : std::max(0.0f, cargoOpen_ - step);
+  h.cargo = cargoOpen_ > 0;
+  h.cargoOpen = cargoOpen_;
+  h.cargoSince = cargoSince_;
 }

@@ -8,4 +8,5 @@
  src/render/../app/../track/Geometry.h \
  src/render/../app/../track/TrackTypes.h \
  src/render/../app/../track/../generated/track_data.h \
- src/render/../generated/fonts.h src/render/../generated/icons.h
+ src/render/../generated/font_cargo.h src/render/../generated/fonts.h \
+ src/render/../generated/icons.h

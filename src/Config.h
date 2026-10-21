@@ -24,6 +24,9 @@
 
 // ── Simulação (sem carro na serial) ──
 #define SIM_SPEED_MS 1.0f    // velocidade do carro simulado em m/s (o carro real anda ~0,4)
+// Na simulação o carro espera o botão RUN em cada ponto (coleta/entrega). O BOOT da placa (GPIO0)
+// faz o papel dele; a serial também aceita {"panel":{"run":true}}. -1 desliga o botão.
+#define SIM_RUN_PIN 0
 
 // ── Desempenho ──
 #define RENDER_DUAL_CORE 1   // desenha faixas pares no núcleo 1 e ímpares no núcleo 0

@@ -32,4 +32,5 @@ class Hud {
   void metrics(Canvas &c, const HudView &h);
   void gpsCard(Canvas &c, const HudView &h);
   void hazard(Canvas &c, const HudView &h);
+  void cargo(Canvas &c, const HudView &h, uint32_t nowMs);
 };

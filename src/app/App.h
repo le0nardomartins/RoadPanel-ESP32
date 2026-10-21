@@ -47,7 +47,16 @@ struct HudView {
   std::string gpsBadge, gpsStatus, gpsLabel, gpsTarget;
   char gpsDistance[16] = "--", gpsEta[12] = "--";
   float gpsOpacity = 0;
+  // Tela da carga: parado no ponto esperando o botão RUN (coleta: colocar; entrega: retirar)
+  bool cargo = false;                   // aberta ou fechando
+  float cargoOpen = 0;                  // 0..1: entra e sai em CARGO_FADE_MS
+  char cargoRole = 'C';                 // 'C' coleta, 'E' entrega
+  char cargoPoint = 0;                  // letra do ponto
+  bool cargoSim = false;                // simulação: o botão é o BOOT da placa ou {"panel":{"run":true}}
+  uint32_t cargoSince = 0;              // ms em que abriu (fase das animações)
 };
+
+constexpr uint32_t CARGO_FADE_MS = 260;   // igual à transição da tela web
 
 struct FrameView {
   // Câmera (metros)
@@ -87,6 +96,8 @@ class App {
   /** JSON sem "hud": o remetente está no ar mas o main.py ainda não publicou. */
   void onWaiting(uint32_t now);
   void onCommand(const PanelCommand &command);
+  /** Simulação: "apertou o botão RUN" (BOOT da placa ou comando serial). Solta a espera no ponto. */
+  void pressRunButton();
   /** Simulação: troca a missão ("AC", "BA"...) e segue dali, sem voltar à partida. */
   void setSimRoute(const std::string &route, uint32_t now);
 
@@ -123,6 +134,7 @@ class App {
   void updateGps(uint32_t now, FrameView &view);
   void updateCamera(float dt, float wx, float wz, float dirX, float dirZ, FrameView &view);
   void updateHud(uint32_t now, float speedMs, FrameView &view);
+  void updateCargo(uint32_t now);
   std::string signName(const PlanEvent &event) const;
 
   TrackNetwork network_;
@@ -199,6 +211,10 @@ class App {
   // Câmera
   bool camReady_ = false;
   Vec3 camPos_{0, 0, 0}, camLook_{0, 0, 0};
+  // Tela da carga (abre/fecha com transição)
+  float cargoOpen_ = 0;
+  uint32_t cargoAt_ = 0, cargoSince_ = 0;
+  bool cargoShown_ = false;
   // Alertas e HUD
   bool hazard_ = false;
   uint32_t hudAt_ = 0;

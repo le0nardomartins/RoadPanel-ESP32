@@ -201,6 +201,13 @@ void checkOneWay(const TrackNetwork &net, const Plan &plan, float s, int &wrongW
   if (dot(p.dir, edge.sample(hit.s).dir) < -0.3f) wrongWay++;
 }
 
+/** Simulação: como quem colocou/retirou a carga, aperta o botão RUN 3 s depois de a tela da carga abrir. */
+constexpr uint32_t CARGO_PRESS_MS = 3000;
+void autoPress(App &app, const FrameView &view, uint32_t now) {
+  const HudView &h = view.hud;
+  if (h.cargo && h.cargoSim && h.cargoOpen >= 1 && now - h.cargoSince >= CARGO_PRESS_MS) app.pressRunButton();
+}
+
 struct Arrival {
   std::string badge;
   uint32_t at;
@@ -241,6 +248,7 @@ RunResult run(App &app, const std::string &tag, uint32_t maxMs, bool stopAfterFi
   for (uint32_t now = start; now < start + maxMs; now += STEP_MS) {
     r.end = now;
     app.update(now, view);
+    autoPress(app, view, now);
     const HudView &h = view.hud;
     const Plan &plan = *view.plan;
 
@@ -272,9 +280,12 @@ RunResult run(App &app, const std::string &tag, uint32_t maxMs, bool stopAfterFi
     }
     if (zoomShotAt && now >= zoomShotAt) {
       zoomShotAt = 0;
+      // A tela da carga cobre a pista de propósito: o enquadramento é conferido sem ela
+      FrameView bare = view;
+      bare.hud.cargo = false;
       Occluder occ[MAX_OCCLUDERS];
-      int n = hud.occluders(view, occ);
-      float visible = trackVisible(net, view, occ, n);
+      int n = hud.occluders(bare, occ);
+      float visible = trackVisible(net, bare, occ, n);
       r.worstZoomVisible = std::min(r.worstZoomVisible, visible);
       r.zoomChecks++;
       // Parado esperando: a posição não mudou desde a chegada
@@ -326,6 +337,7 @@ extern "C" __declspec(dllexport) int roadpanel_frames(const char *out, const cha
   int count = 0;
   for (uint32_t now = 1000; now < 1000 + 300000; now += stepMs) {
     app->update(now, view);
+    autoPress(*app, view, now);
     if (now >= nextShot) {
       nextShot = now + everyMs;
       char name[64];
@@ -391,6 +403,7 @@ extern "C" __declspec(dllexport) int roadpanel_sim(const char *out) {
     bool firstFrame = true;
     for (uint32_t now = 1000; now < 1000 + 300000; now += STEP_MS) {
       app->update(now, view);
+      autoPress(*app, view, now);
       long before = allocCount;
       allocBiggest = 0;
       drawFrame(view, now);
@@ -411,7 +424,7 @@ extern "C" __declspec(dllexport) int roadpanel_sim(const char *out) {
       delete app;
       app = new App();   // refaz até o pior quadro e grava para conferir
       app->setSimRoute(mission, 0);
-      for (uint32_t now = 1000; now <= worstAt; now += STEP_MS) app->update(now, view);
+      for (uint32_t now = 1000; now <= worstAt; now += STEP_MS) app->update(now, view), autoPress(*app, view, now);
       render(view, worstAt, std::string("defeito_") + mission);
     }
     check(worst <= 12000, "%smancha escura cortando a tela (%.0f pixels escuros)", "", worst);
@@ -648,6 +661,66 @@ extern "C" __declspec(dllexport) int roadpanel_sim(const char *out) {
         gps = true;
       }
     }
+    delete app;
+  }
+
+  // Tela da carga: abre no ponto (coleta azul / entrega verde), segura o carro e fecha com o botão
+  {
+    printf("Tela da carga A -> C (simulação, botão BOOT)\n");
+    App *app = new App();
+    FrameView view;
+    app->setSimRoute("AC", 0);
+    std::string seen;
+    int opened = 0, closedAfterPress = 0, movedWhileOpen = 0;
+    uint32_t pressAt = 0;
+    float heldX = NAN, heldY = NAN;
+    bool prevCargo = false;
+    for (uint32_t now = 1000; now < 1000 + 300000; now += STEP_MS) {
+      app->update(now, view);
+      const HudView &h = view.hud;
+      if (h.cargo && !prevCargo) {
+        opened++;
+        seen += std::string(h.cargoRole == 'E' ? "Entrega " : "Coleta ") + h.cargoPoint + "; ";
+        heldX = view.carX, heldY = view.carY;
+      }
+      prevCargo = h.cargo;
+      if (h.cargo && h.cargoOpen >= 1) {
+        if (hypotf(view.carX - heldX, view.carY - heldY) > 0.5f) movedWhileOpen++;
+        uint32_t t = now - h.cargoSince;
+        const char *tag = h.cargoRole == 'E' ? "entrega" : "coleta";
+        for (uint32_t at : {400u, 1300u, 2000u, 2450u}) {
+          if (t >= at && t < at + STEP_MS) {
+            char name[48];
+            snprintf(name, sizeof name, "carga_%s_%04ums", tag, at);
+            render(view, now, name);
+          }
+        }
+        // Capturas para a pasta screenshots: caixa no lugar, aperto do botão (2,4-2,56 s do loop)
+        bool delivery = h.cargoRole == 'E';
+        if (t >= 1300 && t < 1300 + STEP_MS)
+          render(view, now, delivery ? "tela_26_simulacao_entrega_retire_a_carga"
+                                     : "tela_24_simulacao_coleta_coloque_a_carga");
+        if (t >= 2450 && t < 2450 + STEP_MS)
+          render(view, now, delivery ? "tela_27_simulacao_entrega_botao_apertado"
+                                     : "tela_25_simulacao_coleta_botao_apertado");
+        if (t >= CARGO_PRESS_MS && !pressAt) {
+          app->pressRunButton();
+          pressAt = now;
+        }
+      }
+      // Saída da tela (meio da transição de 260 ms) depois do botão na coleta
+      if (pressAt && seen.size() < 12 && now - pressAt >= 120 && now - pressAt < 120 + STEP_MS)
+        render(view, now, "tela_28_simulacao_botao_solto_tela_saindo");
+      if (pressAt && now - pressAt >= CARGO_FADE_MS + 2 * STEP_MS) {
+        if (!h.cargo) closedAfterPress++;
+        pressAt = 0;
+      }
+      if (h.icon == ManeuverIcon::Done && now > 2000 && opened >= 2) break;
+    }
+    printf("  telas: %s fecharam depois do botão: %d\n", seen.c_str(), closedAfterPress);
+    check(seen == "Coleta A; Entrega C; ", "%stela da carga não abriu na coleta A e na entrega C", "");
+    check(closedAfterPress == 2, "%stela da carga não fechou depois do botão (%.0f de 2)", "", closedAfterPress);
+    check(movedWhileOpen == 0, "%scarro andou com a tela da carga aberta (%.0f quadros)", "", movedWhileOpen);
     delete app;
   }
 

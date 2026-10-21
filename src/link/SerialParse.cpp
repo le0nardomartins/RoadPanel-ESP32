@@ -79,6 +79,7 @@ ParseResult parseSerialLine(const char *line, VehicleData &data, PanelCommand &c
       command.simRoute = parseRoute(panel["sim_route"].as<const char *>());
     }
     command.charge = truthy(panel["charge"]);
+    command.run = truthy(panel["run"]);
     return ParseResult::Command;
   }
 

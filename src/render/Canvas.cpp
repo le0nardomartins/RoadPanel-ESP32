@@ -66,6 +66,27 @@ void Canvas::circle(float cx, float cy, float r, Rgb c, int alpha) {
   }
 }
 
+void Canvas::ellipse(float cx, float cy, float rx, float ry, Rgb c, int alpha, float stroke) {
+  if (rx <= 0 || ry <= 0 || alpha <= 0) return;
+  float pad = stroke / 2 + 1;
+  int y0 = std::max((int)floorf(cy - ry - pad), bandY), y1 = std::min((int)ceilf(cy + ry + pad), bandY + BAND_H);
+  if (y0 >= y1) return;
+  int x0 = std::max((int)floorf(cx - rx - pad), 0), x1 = std::min((int)ceilf(cx + rx + pad), SCREEN_W);
+  float irx = 1 / rx, iry = 1 / ry, irx2 = irx * irx, iry2 = iry * iry;
+  for (int yy = y0; yy < y1; yy++) {
+    float dy = yy + 0.5f - cy;
+    for (int xx = x0; xx < x1; xx++) {
+      float dx = xx + 0.5f - cx;
+      // Distância aproximada à borda: (f - 1) / |grad f|, com f = raio normalizado
+      float f = sqrtf(dx * dx * irx2 + dy * dy * iry2);
+      float g = sqrtf(dx * dx * irx2 * irx2 + dy * dy * iry2 * iry2);
+      float dist = g > 1e-6f ? (f - 1) * f / g : -std::min(rx, ry);
+      float cov = stroke > 0 ? clamp01(stroke / 2 + 0.5f - fabsf(dist)) : clamp01(0.5f - dist);
+      if (cov > 0) blendPx(xx, yy, c, (int)(alpha * cov));
+    }
+  }
+}
+
 void Canvas::line(float ax, float ay, float bx, float by, float width, Rgb c, int alpha) {
   float hw = width / 2;
   int y0 = std::max((int)floorf(std::min(ay, by) - hw - 1), bandY);
