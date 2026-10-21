@@ -34,8 +34,8 @@ voltar a andar com PWM > 0. Coleta e entrega alternam como em `Navigation.add_po
 
 Enquanto espera, a tela inteira vira a **tela da carga** (a mesma do painel web, sem voz): céu claro
 com a malha de pontos, uma caixa 3D caindo na caçamba (coleta, azul) ou saindo dela (entrega, verde),
-um toque apertando o botão vermelho e, em letras grandes, **COLOQUE A CARGA** / **RETIRE A CARGA** e
-"E APERTE O BOTÃO ● VERMELHO". Ela entra e sai em 260 ms; aberta, a cena 3D nem é calculada.
+um toque apertando o botão azul (o RUN do carro) e, em letras grandes, **COLOQUE A CARGA** / **RETIRE A CARGA** e
+"E APERTE O BOTÃO ● AZUL". Ela entra e sai em 260 ms; aberta, a cena 3D nem é calculada.
 O título usa `src/generated/font_cargo.h` (Saira 700 condensada), gerada por
 `python tools/gen_cargo_font.py` a partir da fonte do painel web (precisa de Pillow, fontTools e brotli).
 

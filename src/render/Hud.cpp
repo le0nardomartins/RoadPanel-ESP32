@@ -363,16 +363,17 @@ void Hud::hazard(Canvas &c, const HudView &h) {
 
 // ── Tela da carga (parado no ponto esperando o botão RUN) ───────────────
 // Porte da .cargo-takeover do painel web: céu claro, malha de pontos, anéis finos, caixa 3D caindo
-// na caçamba (coleta) ou saindo dela (entrega), setas, botão vermelho apertado por um toque e o
+// na caçamba (coleta) ou saindo dela (entrega), setas, botão azul (o RUN do carro) apertado por um toque e o
 // título grande no centro. Mesmos tempos (loop de 4 s) e curvas do CSS.
 namespace ct {
 
 inline float clamp01f(float v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 
 constexpr Rgb SKY = hex(0xf3f5f9);
-constexpr Rgb RED = hex(0xe3193a);
-constexpr Rgb RED_WALL = hex(0x9c0f27);
-constexpr Rgb RED_LIGHT = hex(0xff6f82);
+// Botão RUN do carro: azul (--route do painel), parede escura e brilho claro
+constexpr Rgb KEY = hex(0x2f7bff);
+constexpr Rgb KEY_WALL = hex(0x123f95);
+constexpr Rgb KEY_LIGHT = hex(0x8ab6ff);
 constexpr Rgb BASE = hex(0xeef1f6);
 constexpr float LOOP_MS = 4000;
 constexpr float CX = SCREEN_W / 2.0f;
@@ -553,7 +554,7 @@ void drawBox(Canvas &c, float cx, float cy, float size, uint32_t elapsed, bool d
   }
 }
 
-/** Botão vermelho: base branca com contorno, parede escura e tampa que desce no aperto. */
+/** Botão azul: base branca com contorno, parede escura e tampa que desce no aperto. */
 void drawButton(Canvas &c, float bx, float by, uint32_t elapsed, float a) {
   float p = phase(elapsed, LOOP_MS);
   float press = 0;
@@ -562,7 +563,7 @@ void drawButton(Canvas &c, float bx, float by, uint32_t elapsed, float a) {
   else if (p >= 0.64f && p < 0.72f) press = 1 - ease(span(p, 0.64f, 0.72f));
   const float rx = 48, ry = 21, capRx = 32, capRy = 12, lift = 13, travel = 8;
 
-  // Ondas vermelhas no aperto
+  // Ondas azuis no aperto
   for (int k = 0; k < 2; k++) {
     float q = phase(elapsed, LOOP_MS, k * 180.0f);
     if (q < 0.59f) continue;
@@ -572,7 +573,7 @@ void drawButton(Canvas &c, float bx, float by, uint32_t elapsed, float a) {
       float t = ease(span(q, 0.61f, 0.90f));
       op = lerp(0.8f, 0, t), sc = lerp(0.85f, 1.6f, t);
     }
-    c.ellipse(bx, by - 4, rx * sc, ry * sc, RED, alphaOf(op * a), 1.5f);
+    c.ellipse(bx, by - 4, rx * sc, ry * sc, KEY, alphaOf(op * a), 1.5f);
   }
 
   // Sombra, base (contorno em tinta) e parede da tampa
@@ -581,11 +582,11 @@ void drawButton(Canvas &c, float bx, float by, uint32_t elapsed, float a) {
   c.ellipse(bx, by, rx, ry, BASE, alphaOf(a));
   float capY = by - lift + press * travel;
   float wall[8] = {bx - capRx, capY, bx + capRx, capY, bx + capRx, by - 2, bx - capRx, by - 2};
-  c.ellipse(bx, by - 2, capRx, capRy, RED_WALL, alphaOf(a));
-  c.convex(wall, 4, RED_WALL, alphaOf(a));
+  c.ellipse(bx, by - 2, capRx, capRy, KEY_WALL, alphaOf(a));
+  c.convex(wall, 4, KEY_WALL, alphaOf(a));
   // Tampa com brilho no canto de cima
-  c.ellipse(bx, capY, capRx, capRy, RED, alphaOf(a));
-  c.ellipse(bx - 6, capY - 3, capRx * 0.55f, capRy * 0.45f, RED_LIGHT, alphaOf(0.55f * a));
+  c.ellipse(bx, capY, capRx, capRy, KEY, alphaOf(a));
+  c.ellipse(bx - 6, capY - 3, capRx * 0.55f, capRy * 0.45f, KEY_LIGHT, alphaOf(0.55f * a));
 
   // Toque: anel que desce, comprime no aperto e sobe
   float op = 0, ty = -0.5f, sc = 1.15f;
@@ -672,8 +673,8 @@ void Hud::cargo(Canvas &c, const HudView &h, uint32_t nowMs) {
   int tw = Canvas::textWidth(fonts::cargo, title);
   c.text(fonts::cargo, (int)(CX - tw / 2.0f), 226 + (int)(14 * (1 - rise1)), title, INK, alphaOf(a * rise1));
 
-  // "E APERTE O BOTÃO ● VERMELHO": a bolinha vermelha cresce junto com o aperto
-  const char *left = "E APERTE O BOTÃO", *right = "VERMELHO";
+  // "E APERTE O BOTÃO ● AZUL": a bolinha azul cresce junto com o aperto
+  const char *left = "E APERTE O BOTÃO", *right = "AZUL";
   const int track = 3, dotGap = 28;
   int lw = Canvas::textWidth(fonts::label, left, track), rw = Canvas::textWidth(fonts::label, right, track);
   int sx = (int)(CX - (lw + dotGap + rw) / 2.0f), sy = 252 + (int)(14 * (1 - rise2));
@@ -682,7 +683,7 @@ void Hud::cargo(Canvas &c, const HudView &h, uint32_t nowMs) {
   float p = phase(elapsed, LOOP_MS), dot = 1;
   if (p >= 0.56f && p < 0.61f) dot = lerp(1, 1.25f, ease(span(p, 0.56f, 0.61f)));
   else if (p >= 0.61f && p < 0.82f) dot = lerp(1.25f, 1, ease(span(p, 0.61f, 0.82f)));
-  c.circle(sx + lw + dotGap / 2.0f, sy - 5, 5 * dot, RED, subA);
+  c.circle(sx + lw + dotGap / 2.0f, sy - 5, 5 * dot, KEY, subA);
   c.text(fonts::label, sx + lw + dotGap, sy, right, INK2, subA, track);
 
   // Simulação: o botão RUN é o BOOT da placa
