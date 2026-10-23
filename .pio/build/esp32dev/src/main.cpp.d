@@ -256,4 +256,4 @@
  src/app/../track/Network.h src/app/../track/Geometry.h \
  src/app/../track/TrackTypes.h src/app/../track/../generated/track_data.h \
  src/render/Hud.h src/render/Canvas.h src/render/FontTypes.h \
- src/render/Scene.h src/generated/fonts.h
+ src/render/Scene.h src/render/Logo.h src/generated/fonts.h

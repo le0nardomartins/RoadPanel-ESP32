@@ -588,8 +588,10 @@ void App::update(uint32_t now, FrameView &view) {
   float target = await_.active ? 0 : measured;
   liveSpeed_ += (target - liveSpeed_) * (1 - expf(-dt * 8));
   if (target == 0 && liveSpeed_ < 0.01f) liveSpeed_ = 0;
-  const float speedMs = liveSpeed_;
-  s_ = localizer_.step(plan_, s_, data, dt, speedMs, METERS_PER_PX, now, pointConfirmed_, !serverRoute_.empty());
+  const float speedMs = liveSpeed_;   // o número em M/S na tela: sempre a velocidade real
+  // SPEED_SCALE (Config.h): só o carro 3D anda no mapa com a velocidade digital
+  const float mapSpeedMs = liveSpeed_ * SPEED_SCALE;
+  s_ = localizer_.step(plan_, s_, data, dt, mapSpeedMs, METERS_PER_PX, now, pointConfirmed_, !serverRoute_.empty());
   pointConfirmed_ = false;
   if (s_ >= plan_.length) {
     replan(false, &LAP_START, now);
@@ -609,12 +611,13 @@ void App::update(uint32_t now, FrameView &view) {
   // Posição: acompanha direto; saltos de correção deslizam em ~0,3 s. O avanço normal do quadro
   // não conta como salto (com quadros lentos ele passa de SNAP_DISTANCE_PX e o carro ficava para trás).
   float jump = shownReady_ ? hypotf(p.pos.x - shownX_, p.pos.y - shownY_) : 0;
-  float expected = speedMs / METERS_PER_PX * dt;
+  float expected = mapSpeedMs / METERS_PER_PX * dt;
   float follow = shownReady_ ? (jump > expected + SNAP_DISTANCE_PX ? 1 - expf(-dt * 9) : 1) : 1;
   shownX_ += (p.pos.x - shownX_) * follow;
   shownY_ += (p.pos.y - shownY_) * follow;
   shownReady_ = true;
-  if (speedMs > 0.05f) cruiseMs_ += (speedMs - cruiseMs_) * std::min(1.0f, dt * 0.5f);
+  // ETA da prévia GPS: tempo do carro no mapa até a próxima placa
+  if (mapSpeedMs > 0.05f) cruiseMs_ += (mapSpeedMs - cruiseMs_) * std::min(1.0f, dt * 0.5f);
 
   view.light = hasData_ && liveData_.trafficLight >= 0 && liveData_.trafficLight <= 2
                    ? liveData_.trafficLight : -1;

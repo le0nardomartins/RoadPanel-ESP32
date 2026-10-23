@@ -1,6 +1,16 @@
 #pragma once
 // Ajustes de hardware. Pinos iguais aos do display_tft.ino (ESP32 DevKit + ST7796S 480x320 SPI).
 
+// ── Velocidade digital (ajuste aqui) ──
+// Coeficiente da velocidade do carro 3D no mapa em relação à velocidade real (telemetry.speed, ou a
+// estimada pelo PWM). O número em M/S no topo da tela continua mostrando a velocidade real.
+//   1.0  = o carro 3D anda igual ao real (2 m/s no carro -> 2 m/s no mapa)
+//   0.5  = metade                         (2 m/s no carro -> 1 m/s no mapa)
+//   0.25 = um quarto                      (2 m/s no carro -> 0,5 m/s no mapa)
+// Para calibrar: cronometre uma volta do carro real e compare com a volta no mapa; se o carrinho
+// chega antes, diminua o valor na mesma proporção (ex.: chegou na metade do tempo -> divida por 2).
+#define SPEED_SCALE 1.0f
+
 // ── Display ST7796S (SPI) ──
 #define TFT_SCLK 18
 #define TFT_MOSI 23
