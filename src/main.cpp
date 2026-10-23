@@ -8,7 +8,7 @@
 //   {"hud":{"route":"A → C","traffic_light_code":-1,"stop_active":false,"right_detour_active":false,
 //    "control_mode":"AUTONOMO"},"command":{"run":true,"speed":120,"servo":90,"stop":false},
 //    "telemetry":{"speed":0.42,"battery":84,"f_left":0,"f_right":0},"_ts":1712345678.1,"time":"14:32"}
-// ou o formato antigo "0.42,90" (velocidade m/s, servo). Sem dados, o painel fica em simulação.
+// ou o formato antigo "0.42,90" (velocidade m/s, servo). Sem dados, o painel mostra só a logo do time.
 
 #include <Arduino.h>
 #include <LovyanGFX.hpp>
@@ -18,6 +18,7 @@
 #include "app/App.h"
 #include "link/VehicleData.h"
 #include "render/Hud.h"
+#include "render/Logo.h"
 #include "render/Scene.h"
 #include "generated/fonts.h"
 
@@ -155,14 +156,12 @@ static void splash(float progress, const char *text) {
     Canvas c;
     c.begin(buf, band * BAND_H);
     c.fillRect(0, band * BAND_H, SCREEN_W, BAND_H, BG);
-    int w = Canvas::textWidth(fonts::distance, "APEX", 4);
-    c.text(fonts::distance, (SCREEN_W - w) / 2, 130, "APEX", INK, 255, 4);
-    w = Canvas::textWidth(fonts::title, "Mapa da pista");
-    c.text(fonts::title, (SCREEN_W - w) / 2, 156, "Mapa da pista", INK);
-    c.roundRect(140, 180, 200, 6, 3, hex(0xd9dee6));
-    c.roundRect(140, 180, 200 * progress, 6, 3, ROUTE);
-    w = Canvas::textWidth(fonts::body, text);
-    c.text(fonts::body, (SCREEN_W - w) / 2, 210, text, INK3);
+    // Logo do time no mesmo lugar da tela sem dados (a abertura emenda nela)
+    logo::draw(c, (SCREEN_W - logo::width()) / 2, (SCREEN_H - logo::height()) / 2 - 18, INK);
+    c.roundRect(160, 236, 160, 4, 2, hex(0xd9dee6));
+    c.roundRect(160, 236, 160 * progress, 4, 2, ROUTE);
+    int w = Canvas::textWidth(fonts::label, text, 1);
+    c.text(fonts::label, (SCREEN_W - w) / 2, 262, text, INK3, 255, 1);
     lcd.pushImageDMA(0, band * BAND_H, SCREEN_W, BAND_H, (lgfx::swap565_t *)buf);
   }
   lcd.waitDMA();
@@ -204,26 +203,7 @@ static void readSerial(uint32_t now) {
   }
 }
 
-// ── Botão RUN da simulação (BOOT da placa) ───────────────────────────────
-// Na simulação o carro trava em cada ponto até o botão RUN, como no painel web; aqui quem faz o
-// papel dele é o BOOT. Solto o pino fica em 1 (pull-up); apertado vai a 0.
-static void readSimRunButton(uint32_t now) {
-#if SIM_RUN_PIN >= 0
-  static bool wasDown = false;
-  static uint32_t changedAt = 0;
-  bool down = digitalRead(SIM_RUN_PIN) == LOW;
-  if (down != wasDown && now - changedAt > 30) {   // 30 ms contra o repique do contato
-    changedAt = now;
-    wasDown = down;
-    if (down) app.pressRunButton();
-  }
-#endif
-}
-
 void setup() {
-#if SIM_RUN_PIN >= 0
-  pinMode(SIM_RUN_PIN, INPUT_PULLUP);
-#endif
   Serial.setRxBufferSize(SERIAL_LINE_MAX * 2);
   Serial.begin(SERIAL_BAUD);
   for (auto &core : buffers)
@@ -256,7 +236,6 @@ void setup() {
 void loop() {
   uint32_t now = millis();
   readSerial(now);
-  readSimRunButton(now);
   drawFrame(now);
 
   // fps (média de 1 s)

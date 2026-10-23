@@ -1,6 +1,6 @@
 #pragma once
-// Porte de main.js + cameraRig.js + hud.js (parte lógica): estado do painel, simulação,
-// modo real pela serial, localização, prévia GPS, alertas e câmera. Não desenha nada:
+// Porte de main.js + cameraRig.js + hud.js (parte lógica): estado do painel com os dados do
+// carro pela serial, localização, prévia GPS, alertas e câmera. Não desenha nada:
 // a cada quadro produz um FrameView que o renderizador consome. Independente de Arduino.
 
 #include <string>
@@ -14,15 +14,12 @@ struct Vec3 {
   float x, y, z;   // metros; y para cima (como o Three.js), z = y da pista
 };
 
-enum class Source : uint8_t { Sim, Live };
 enum class LinkStatus : uint8_t { Connecting, Live, Waiting, Stale, Offline };
 enum class ManeuverIcon : uint8_t { Straight, Right, Left, Stop, Light, Flag, Done, Point };
 
 struct HudView {
   char clock[8] = "--:--";
   char speed[12] = "0,00";
-  // estado da origem: "sim" nunca se passa por dado real
-  bool sim = true;
   LinkStatus link = LinkStatus::Connecting;
   int light = -1;                       // -1 nenhum, 0 vermelho, 1 amarelo, 2 verde
   ManeuverIcon icon = ManeuverIcon::Straight;
@@ -52,8 +49,15 @@ struct HudView {
   float cargoOpen = 0;                  // 0..1: entra e sai em CARGO_FADE_MS
   char cargoRole = 'C';                 // 'C' coleta, 'E' entrega
   char cargoPoint = 0;                  // letra do ponto
-  bool cargoSim = false;                // simulação: o botão é o BOOT da placa ou {"panel":{"run":true}}
   uint32_t cargoSince = 0;              // ms em que abriu (fase das animações)
+  // Tela da bateria: carregando (battery_state 1) a cena fecha e fica só a bateria com a porcentagem
+  bool charging = false;                // aberta ou fechando
+  float chargingOpen = 0;               // 0..1: entra e sai em CARGO_FADE_MS
+  float chargeLevel = NAN;              // % (NAN = sem leitura: a barra corre de ponta a ponta)
+  uint32_t chargingSince = 0;           // ms em que abriu (fase das animações)
+  // Tela da logo: sem dados do carro (ligando, sem sinal, dados parados) fica só a logo do time
+  bool logo = true;                     // aberta ou fechando
+  float logoOpen = 1;                   // 0..1: entra e sai em CARGO_FADE_MS
 };
 
 constexpr uint32_t CARGO_FADE_MS = 260;   // igual à transição da tela web
@@ -75,17 +79,8 @@ struct FrameView {
   float gpsS0 = 0, gpsS1 = 0, gpsProgress = 0, gpsOpacity = 0;
   Vec2 gpsPin{0, 0};
   int light = -1;
-  // Onda de carga (bateria começou a carregar): anéis verdes saindo do carro na malha de pontos
-  float chargeT = -1;                   // s desde o início; < 0 = sem onda
-  Vec2 chargeOrigin{0, 0};              // px da pista
-  // Fumaça verde nas bordas da tela nos primeiros 2 s da carga
-  float smokeT = -1;                    // s desde o início; < 0 = sem fumaça
   HudView hud;
 };
-
-// Onda verde: 9 s de pulsos lentos; fumaça nas bordas: 2 s (iguais ao painel web)
-constexpr float CHARGE_WAVE_S = 9.0f;
-constexpr float CHARGE_SMOKE_S = 2.0f;
 
 class App {
  public:
@@ -96,10 +91,6 @@ class App {
   /** JSON sem "hud": o remetente está no ar mas o main.py ainda não publicou. */
   void onWaiting(uint32_t now);
   void onCommand(const PanelCommand &command);
-  /** Simulação: "apertou o botão RUN" (BOOT da placa ou comando serial). Solta a espera no ponto. */
-  void pressRunButton();
-  /** Simulação: troca a missão ("AC", "BA"...) e segue dali, sem voltar à partida. */
-  void setSimRoute(const std::string &route, uint32_t now);
 
   /** Um quadro: atualiza tudo e preenche view. */
   void update(uint32_t now, FrameView &view);
@@ -119,22 +110,23 @@ class App {
   Location currentLocation() const;
   void replan(bool reveal, const Location *from, uint32_t now);
   bool needsReplan() const;
-  void consumePoint(uint32_t now);
   void applyServerRoute(const std::string &next, const std::string &raw, int missionState, uint32_t now);
-  void setSource(Source source, uint32_t now, bool byUser = false);
   void finishMission();
-  float simSpeedPx(uint32_t now) const;
-  const PlanEvent *nextEvent(EventType type, float maxPx) const;
+  /** Pontos de interesse alterados: missão nova, carro de volta na partida. */
+  void restartMission(uint32_t now);
+  /** O carro (estimado) já está perto do ponto `point` da trajetória? */
+  bool nearPoint(char point) const;
   void arrivedAtPoint(char point, char role, bool waitButton, uint32_t now);
   void syncRoles(int missionState);
   void updateAwaitButton(uint32_t now);
   void releaseButtonWait();
-  void startCharge(uint32_t now);
   void updateLink(uint32_t now);
   void updateGps(uint32_t now, FrameView &view);
   void updateCamera(float dt, float wx, float wz, float dirX, float dirZ, FrameView &view);
   void updateHud(uint32_t now, float speedMs, FrameView &view);
   void updateCargo(uint32_t now);
+  void updateCharging(uint32_t now);
+  void updateLogo(uint32_t now);
   std::string signName(const PlanEvent &event) const;
 
   TrackNetwork network_;
@@ -142,7 +134,6 @@ class App {
   Plan plan_;
 
   // Estado (main.js: state)
-  Source source_ = Source::Sim;
   LinkStatus linkStatus_ = LinkStatus::Connecting;
   bool hasData_ = false;
   VehicleData liveData_;
@@ -157,15 +148,10 @@ class App {
   bool headingReady_ = false;
   float heading_ = 0;
   bool missionDone_ = false;
-  // Simulação
-  float simSpeed_ = SIM_SPEED_MS;
-  std::string simRoute_ = "AC";  // na prova vêm 2 dos 3 pontos: coleta no 1º, entrega no último
-  int simDone_ = 0;
+  // Chegada no ponto
   uint32_t pointHoldUntil_ = 0;
   char arrivalPoint_ = 0;
   char arrivalRole_ = 0;
-  uint32_t stopHoldUntil_ = 0;
-  int stoppedAtKey_ = -1;
   // Espelho do point_stop_latched do main.py: parado no ponto até o botão RUN do carro
   struct AwaitButton {
     bool active = false;
@@ -177,14 +163,12 @@ class App {
   std::string serverRoute_, serverRaw_, liveDone_;
   std::string serverRoles_, liveDoneRoles_;   // papéis ('C'/'E'), como nav.mission_state
   int localConsumed_ = 0;
-  // Onda de carga
-  bool batteryKnown_ = false;   // já veio uma resposta (abrir já carregando não dispara)
-  int batteryPrev_ = -1;
-  bool chargePending_ = false;
-  uint32_t chargeStart_ = 0;
-  bool charging_ = false;
-  Vec2 chargeOrigin_{0, 0};
-  bool userPickedSource_ = false;
+  // Tela da bateria (carregando)
+  float chargingOpen_ = 0;
+  uint32_t chargingAt_ = 0, chargingSince_ = 0;
+  // Tela da logo (sem dados): começa aberta
+  float logoOpen_ = 1;
+  uint32_t logoAt_ = 0;
   uint32_t lastOkAt_ = 0, lastTsChangeAt_ = 0;
   bool everOk_ = false;
   double lastTs_ = NAN;

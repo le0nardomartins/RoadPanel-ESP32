@@ -35,12 +35,7 @@ struct VehicleData {
 
 // Comandos opcionais que a serial também aceita (não fazem parte do vehicle_info)
 struct PanelCommand {
-  int source = -1;            // 0 simulação, 1 serial
   int planMode = -1;          // 0 caminho livre, 1 tabela do carro
-  bool hasSimRoute = false;   // missão da simulação, ex.: "BA" (coleta em B, entrega em A)
-  std::string simRoute;
-  bool charge = false;        // toca a onda de carga (como "Simular carregamento" do painel web)
-  bool run = false;           // simulação: aperta o botão RUN (como "Apertar botão RUN" do painel web)
 };
 
 enum class ParseResult : uint8_t { None, Vehicle, Command, Error };

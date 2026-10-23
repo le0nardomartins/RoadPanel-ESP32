@@ -1,5 +1,6 @@
 """Gera src/generated/font_cargo.h: a Saira grande (negrito, condensada) do título da tela da
-carga ("COLOQUE A CARGA" / "RETIRE A CARGA"), no mesmo formato 4 bpp de fonts.h.
+carga ("COLOQUE A CARGA" / "RETIRE A CARGA") e da porcentagem da tela da bateria ("37%"), no
+mesmo formato 4 bpp de fonts.h.
 
 Uso (precisa de Pillow, fontTools e brotli para ler o .woff2 do painel web):
   python tools/gen_cargo_font.py
@@ -17,7 +18,7 @@ OUT = ROOT / "src" / "generated" / "font_cargo.h"
 
 SIZE = 52                       # px: maiúsculas com ~36 px de altura em 480x320
 AXES = {"wght": 700, "wdth": 85}  # igual ao título da tela web (font-weight 700, font-stretch 85%)
-CHARS = " ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+CHARS = " %-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
 def load_font():
@@ -55,7 +56,7 @@ def main():
 
     lines = [
         "// GERADO por tools/gen_cargo_font.py (Saira, OFL) — não edite à mão.",
-        "// Título da tela da carga: só maiúsculas e espaço.",
+        "// Título da tela da carga e porcentagem da tela da bateria: maiúsculas, algarismos, % e -.",
         "#pragma once",
         '#include "../render/FontTypes.h"',
         "",

@@ -33,4 +33,6 @@ class Hud {
   void gpsCard(Canvas &c, const HudView &h);
   void hazard(Canvas &c, const HudView &h);
   void cargo(Canvas &c, const HudView &h, uint32_t nowMs);
+  void charging(Canvas &c, const HudView &h, uint32_t nowMs);
+  void logoScreen(Canvas &c, const HudView &h, uint32_t nowMs);
 };

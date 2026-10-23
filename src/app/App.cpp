@@ -14,7 +14,7 @@ constexpr uint32_t REVEAL_MS = 1100;
 constexpr uint32_t GPS_DRAW_MS = 1100;
 constexpr uint32_t GPS_FADE_MS = 450;
 constexpr uint32_t HUD_INTERVAL_MS = 120;
-constexpr float MAX_DT = 0.5f;   // s: quadros lentos do ESP32 não atrasam a simulação (antes 0,1 s)
+constexpr float MAX_DT = 0.5f;   // s: quadros lentos do ESP32 não atrasam a câmera e a fita (antes 0,1 s)
 constexpr float SNAP_DISTANCE_PX = 4;
 // Logo depois de chegar, command.speed ainda pode ser o de antes do latch (o main.py trava no laço
 // seguinte ao que tirou o ponto da rota): PWM > 0 só conta como "saiu do ponto" depois disso
@@ -50,31 +50,16 @@ void formatMeters(char *out, size_t size, float meters) {
 
 std::string tail(const std::string &s, int from) { return from < (int)s.size() ? s.substr(std::max(0, from)) : ""; }
 
-std::string arrowRoute(const std::string &route) {
-  std::string out;
-  for (char c : route) {
-    if (!out.empty()) out += " → ";
-    out += c;
-  }
-  return out;
-}
-
 }  // namespace
 
 App::App() {}
 
 // ── Missão efetiva ───────────────────────────────────────────────────────
-std::string App::currentQueue() const {
-  if (source_ == Source::Live) return tail(serverRoute_, localConsumed_);
-  return tail(simRoute_, simDone_);
-}
+std::string App::currentQueue() const { return tail(serverRoute_, localConsumed_); }
 
 App::MissionView App::missionView() const {
-  if (source_ == Source::Live) {
-    return {liveDone_ + serverRoute_, liveDoneRoles_ + serverRoles_, (int)liveDone_.size() + localConsumed_,
-            serverRaw_};
-  }
-  return {simRoute_, alternateRoles((int)simRoute_.size()), simDone_, arrowRoute(simRoute_)};
+  return {liveDone_ + serverRoute_, liveDoneRoles_ + serverRoles_, (int)liveDone_.size() + localConsumed_,
+          serverRaw_};
 }
 
 char App::pendingRole(const MissionView &mission, char point) {
@@ -98,7 +83,7 @@ Location App::currentLocation() const {
 void App::replan(bool reveal, const Location *from, uint32_t now) {
   std::string queue = currentQueue();
   Location start = from ? *from : currentLocation();
-  plan_ = buildPlan(network_, start, queue, planMode_, source_ == Source::Live ? localizer_.detours : 0);
+  plan_ = buildPlan(network_, start, queue, planMode_, localizer_.detours);
   planQueue_ = queue;
   planConsumed_ = 0;
   s_ = 0;
@@ -132,11 +117,6 @@ void App::arrivedAtPoint(char point, char role, bool waitButton, uint32_t now) {
   pointHoldUntil_ = now + POINT_HOLD_MS;
 }
 
-void App::pressRunButton() {
-  // No modo real quem solta é o run_btn da telemetria (updateAwaitButton)
-  if (source_ == Source::Sim && await_.active) releaseButtonWait();
-}
-
 void App::releaseButtonWait() {
   if (await_.active) pointHoldUntil_ = 0;
   await_ = AwaitButton{};
@@ -167,30 +147,39 @@ void App::updateAwaitButton(uint32_t now) {
   if (d.running && d.pwm > 0 && now - await_.at > LATCH_PWM_GRACE_MS) releaseButtonWait();
 }
 
-void App::consumePoint(uint32_t now) {
-  planConsumed_ += 1;
-  if (source_ == Source::Live) {
-    localConsumed_ += 1;
-  } else {
-    char role = alternateRoles((int)simRoute_.size())[simDone_];
-    // Como o main.py e o painel web: trava em todo ponto até o botão RUN (na simulação, o BOOT)
-    arrivedAtPoint(simRoute_[simDone_], role, true, now);
-    simDone_ += 1;
-  }
-}
-
 void App::finishMission() {
   if (missionDone_) return;
   missionDone_ = true;
 }
 
+void App::restartMission(uint32_t now) {
+  releaseButtonWait();
+  pointHoldUntil_ = 0;
+  missionDone_ = false;
+  localizer_.restart();
+  // Volta direto para a partida (sem deslizar pela pista) e a câmera acompanha
+  shownReady_ = headingReady_ = camReady_ = false;
+  // Antes do 1º quadro o update() já monta o plano da partida
+  if (!first_) replan(true, &CAR_START, now);
+}
+
+bool App::nearPoint(char point) const {
+  for (const PlanEvent &e : plan_.events) {
+    if (e.type != EventType::Point || !e.target || e.point != point) continue;
+    // A estimativa pode errar uns 25% (sem marcos): metade do caminho ou a 3 m da placa já conta
+    return s_ >= e.s * 0.5f || fabsf(e.s - s_) < 3 / METERS_PER_PX;
+  }
+  return false;
+}
+
 // ── Serial ───────────────────────────────────────────────────────────────
 /**
- * Sincroniza com a lista que o carro manda (nav.route). Quando ela encolhe, o carro consumiu uma
- * parada: no main.py a mesma detecção que tira o ponto da rota liga point_stop_latched, então o carro
- * está parado no ponto esperando o botão RUN. A posição vai para a placa do ponto e a trajetória é
- * refeita dali. Os papéis seguem Navigation.add_point; missionState (command.mission_state) corrige
- * o ponto atual.
+ * Sincroniza com a lista que o carro manda (nav.route). Quando ela perde só o primeiro ponto, o carro
+ * consumiu uma parada: no main.py a mesma detecção que tira o ponto da rota liga point_stop_latched,
+ * então o carro está parado no ponto esperando o botão RUN. A posição vai para a placa do ponto e a
+ * trajetória é refeita dali. Qualquer outra mudança (Resetar Rota, ponto novo, lista trocada) é o
+ * usuário alterando os pontos: a missão recomeça só com a lista nova e o carro volta para a partida.
+ * Os papéis seguem Navigation.add_point; missionState (command.mission_state) corrige o ponto atual.
  */
 void App::applyServerRoute(const std::string &next, const std::string &raw, int missionState, uint32_t now) {
   serverRaw_ = raw;
@@ -203,19 +192,20 @@ void App::applyServerRoute(const std::string &next, const std::string &raw, int 
   for (int k = 1; k <= (int)prev.size(); k++) {
     if (prev.substr(k) == next) { confirmed = k; break; }
   }
+  // O carro confirma um ponto por vez. Esvaziar uma lista de vários pontos de uma vez, ou esvaziar a
+  // de um ponto com o carro longe dele, é o "Resetar Rota" do painel de controle.
+  if (confirmed > 1 || (confirmed == 1 && next.empty() && !nearPoint(prev[0]))) confirmed = 0;
   serverRoute_ = next;
   if (confirmed > 0) {
     liveDone_ += prev.substr(0, confirmed);
     liveDoneRoles_ += serverRoles_.substr(0, std::min((size_t)confirmed, serverRoles_.size()));
     serverRoles_ = tail(serverRoles_, confirmed);
-    if (source_ == Source::Live) {
-      int index = (int)liveDone_.size() - 1;
-      char role = index < (int)liveDoneRoles_.size() ? liveDoneRoles_[index] : 0;
-      // Em modo manual o main.py não liga o latch (route_stop_requested é ignorado)
-      bool latched = !(hasData_ && liveData_.controlMode == "MANUAL");
-      arrivedAtPoint(liveDone_[index], role, latched, now);
-    }
-    if (source_ == Source::Live && !plan_.edges.empty()) {
+    int index = (int)liveDone_.size() - 1;
+    char role = index < (int)liveDoneRoles_.size() ? liveDoneRoles_[index] : 0;
+    // Em modo manual o main.py não liga o latch (route_stop_requested é ignorado)
+    bool latched = !(hasData_ && liveData_.controlMode == "MANUAL");
+    arrivedAtPoint(liveDone_[index], role, latched, now);
+    if (!plan_.edges.empty()) {
       int seen = 0;
       for (const PlanEvent &e : plan_.events) {
         if (e.type == EventType::Point && e.target && ++seen == confirmed) {
@@ -228,18 +218,19 @@ void App::applyServerRoute(const std::string &next, const std::string &raw, int 
     localizer_.confirmPoint(now);
     pointConfirmed_ = true;
     localConsumed_ = 0;
-    if (source_ == Source::Live && !plan_.edges.empty()) replan(false, nullptr, now);
-  } else if (!(next.size() > prev.size() && next.compare(0, prev.size(), prev) == 0)) {
-    // Rota trocada por fora (reset/nova missão): recomeça como uma lista nova
+    if (!plan_.edges.empty()) replan(false, nullptr, now);
+  } else {
+    // Pontos alterados: os já feitos saem da tela (não se somam aos novos)
+    if (next.size() > prev.size() && next.compare(0, prev.size(), prev) == 0) {
+      // add_point: alterna a partir do último ponto ainda na lista (lista vazia = coleta)
+      serverRoles_ += appendRoles(serverRoles_.empty() ? 0 : serverRoles_.back(), (int)(next.size() - prev.size()));
+    } else {
+      serverRoles_ = alternateRoles((int)next.size());   // reset / lista trocada
+    }
     liveDone_.clear();
     liveDoneRoles_.clear();
-    serverRoles_ = alternateRoles((int)next.size());
     localConsumed_ = 0;
-    missionDone_ = false;
-  } else {
-    // add_point: alterna a partir do último ponto ainda na lista (lista vazia = coleta)
-    serverRoles_ += appendRoles(serverRoles_.empty() ? 0 : serverRoles_.back(), (int)(next.size() - prev.size()));
-    missionDone_ = false;   // pontos novos depois de finalizar: novo percurso
+    restartMission(now);
   }
 }
 
@@ -252,14 +243,6 @@ void App::syncRoles(int missionState) {
   char actual = roleFromMissionState(missionState);
   if (!actual || serverRoute_.empty() || (!serverRoles_.empty() && serverRoles_[0] == actual)) return;
   serverRoles_ = alternateRoles((int)serverRoute_.size(), actual);
-}
-
-// ── Onda de carga ────────────────────────────────────────────────────────
-void App::startCharge(uint32_t now) {
-  chargePending_ = false;
-  charging_ = true;
-  chargeStart_ = now;
-  chargeOrigin_ = {shownX_, shownY_};
 }
 
 void App::onVehicleData(const VehicleData &data, uint32_t now) {
@@ -277,12 +260,7 @@ void App::onVehicleData(const VehicleData &data, uint32_t now) {
     clockAt_ = now;
   }
   updateLink(now);
-  if (!userPickedSource_ && linkStatus_ == LinkStatus::Live && source_ != Source::Live) setSource(Source::Live, now);
-  if (source_ == Source::Live) applyServerRoute(data.route, data.routeText, data.missionState, now);
-  // Bateria passou a carregar: onda verde + fumaça nas bordas (abrir já carregando não dispara)
-  if (batteryKnown_ && data.batteryState == BATTERY_CHARGING && batteryPrev_ != BATTERY_CHARGING) chargePending_ = true;
-  batteryKnown_ = true;
-  batteryPrev_ = data.batteryState;
+  applyServerRoute(data.route, data.routeText, data.missionState, now);
 }
 
 void App::onWaiting(uint32_t now) {
@@ -292,10 +270,6 @@ void App::onWaiting(uint32_t now) {
 }
 
 void App::onCommand(const PanelCommand &command) {
-  if (command.source >= 0) setSource(command.source ? Source::Live : Source::Sim, last_, true);
-  if (command.hasSimRoute) setSimRoute(command.simRoute, last_);
-  if (command.charge) chargePending_ = true;
-  if (command.run) pressRunButton();
   if (command.planMode >= 0) {
     PlanMode mode = command.planMode ? PlanMode::Car : PlanMode::Shortest;
     if (mode != planMode_) {
@@ -317,48 +291,6 @@ void App::updateLink(uint32_t now) {
   }
 }
 
-void App::setSource(Source source, uint32_t now, bool byUser) {
-  if (byUser) userPickedSource_ = true;
-  if (source_ == source) return;
-  source_ = source;
-  releaseButtonWait();   // a espera no ponto é de uma fonte só
-  if (source == Source::Live) {
-    // Modo real: o carro só anda com o que chega do servidor; começa na partida
-    serverRoute_.clear();
-    serverRoles_.clear();
-    liveDone_.clear();
-    liveDoneRoles_.clear();
-    localConsumed_ = 0;
-    localizer_.restart();
-    if (hasData_) applyServerRoute(liveData_.route, liveData_.routeText, liveData_.missionState, now);
-    replan(true, &CAR_START, now);
-  } else {
-    replan(true, nullptr, now);
-  }
-}
-
-// ── Simulação ────────────────────────────────────────────────────────────
-void App::setSimRoute(const std::string &route, uint32_t now) {
-  simRoute_ = route;
-  simDone_ = 0;
-  stopHoldUntil_ = pointHoldUntil_ = 0;
-  missionDone_ = false;
-  // Antes do 1º quadro o update() já monta o plano da partida; depois, segue de onde o carro está
-  if (!first_ && source_ == Source::Sim) replan(true, nullptr, now);
-}
-
-const PlanEvent *App::nextEvent(EventType type, float maxPx) const {
-  for (const PlanEvent &e : plan_.events) {
-    if (e.type == type && e.s - s_ >= -2 && e.s - s_ <= maxPx) return &e;
-  }
-  return nullptr;
-}
-
-float App::simSpeedPx(uint32_t now) const {
-  if (missionDone_ || now < stopHoldUntil_ || now < pointHoldUntil_) return 0;
-  return simSpeed_ / METERS_PER_PX;
-}
-
 // ── Prévia GPS ───────────────────────────────────────────────────────────
 std::string App::signName(const PlanEvent &event) const {
   if (gpsTargetIsStart_) return "Linha de chegada";
@@ -378,7 +310,6 @@ std::string App::signName(const PlanEvent &event) const {
 void App::updateGps(uint32_t now, FrameView &view) {
   GpsReason reason = GpsReason::None;
   if (now < pointHoldUntil_) reason = GpsReason::Point;
-  else if (source_ == Source::Sim) reason = now < stopHoldUntil_ ? GpsReason::Stop : GpsReason::None;
   else if (linkStatus_ == LinkStatus::Live && hasData_ && liveData_.stopActive) reason = GpsReason::Stop;
 
   if (reason != GpsReason::None && (reason != gpsReason_ || (gpsActive_ && gpsPlanSerial_ != plan_.serial))) {
@@ -438,8 +369,7 @@ void App::updateGps(uint32_t now, FrameView &view) {
   if (!gpsActive_) return;
 
   float meters = std::max(0.0f, gpsTarget_.s - s_) * METERS_PER_PX;
-  float speed = source_ == Source::Sim ? simSpeed_ : cruiseMs_;
-  int left = (int)ceilf(std::max(0.0f, ((int32_t)(gpsUntil_ - now)) / 1000.0f - 0.05f));
+  float speed = cruiseMs_;
   const char *where = gpsReason_ == GpsReason::Point ? "No ponto" : "Parado na placa";
   formatMeters(hud_.gpsDistance, sizeof hud_.gpsDistance, meters);
   if (speed > 0.02f) snprintf(hud_.gpsEta, sizeof hud_.gpsEta, "~%d s", std::max(1, (int)roundf(meters / speed)));
@@ -447,7 +377,6 @@ void App::updateGps(uint32_t now, FrameView &view) {
   char status[48];
   // Cartão estreito (480x320): o selo já diz "Coleta A", então só o que fazer
   if (await_.active) snprintf(status, sizeof status, "Aperte o botão RUN");
-  else if (left > 0 && source_ == Source::Sim) snprintf(status, sizeof status, "%s · segue em %d s", where, left);
   else snprintf(status, sizeof status, "%s", where);
   hud_.gpsStatus = status;
 }
@@ -457,7 +386,7 @@ void App::updateCamera(float dt, float wx, float wz, float dirX, float dirZ, Fra
   Vec3 target, look;
   // Sempre atrás do carro; parado numa placa (PARE ou ponto) abre e mostra a pista inteira,
   // quase de cima, segura essa vista enquanto o carro espera e volta sozinha quando ele segue.
-  // Só a câmera muda: a simulação e a missão continuam de onde estavam.
+  // Só a câmera muda: a missão continua de onde estava.
   bool framing = gpsActive_;
   if (framing) {
     // Vista de cima da pista toda (todos os trechos), encaixada na área livre da tela
@@ -513,7 +442,6 @@ void App::updateHud(uint32_t now, float speedMs, FrameView &view) {
   }
   snprintf(h.speed, sizeof h.speed, "%.2f", speedMs);
   for (char *c = h.speed; *c; c++) if (*c == '.') *c = ',';
-  h.sim = source_ == Source::Sim;
   h.link = linkStatus_;
   h.light = view.light;
 
@@ -584,7 +512,7 @@ void App::updateHud(uint32_t now, float speedMs, FrameView &view) {
   h.missionReceived = !mission.raw.empty() && !mission.all.empty();
 
   // Métricas
-  const VehicleData *data = source_ == Source::Live && hasData_ ? &liveData_ : nullptr;
+  const VehicleData *data = hasData_ ? &liveData_ : nullptr;
   char buf[24];
   if (data) {
     snprintf(buf, sizeof buf, "%d", (int)roundf(data->pwm));
@@ -600,13 +528,10 @@ void App::updateHud(uint32_t now, float speedMs, FrameView &view) {
   } else {
     h.pwm = h.servo = h.battery = "--";
   }
-  // Estado do BMS (raio verde carregando); a carga simulada mostra "carregando" enquanto a onda toca
+  // Estado do BMS (raio verde carregando)
   h.batteryState = hasData_ && linkStatus_ == LinkStatus::Live && liveData_.batteryState >= 0 &&
                            liveData_.batteryState <= 4 ? liveData_.batteryState : -1;
-  if (charging_ && h.batteryState < 0) h.batteryState = BATTERY_CHARGING;
-  if (source_ == Source::Sim) {
-    h.mode = missionDone_ ? "Finalizado" : await_.active ? "No ponto" : now < stopHoldUntil_ ? "Parado na placa" : "Simulando";
-  } else if (data && await_.active) {
+  if (data && await_.active) {
     h.mode = "No ponto";
   } else if (data) {
     if (!data->controlMode.empty()) {
@@ -638,7 +563,7 @@ void App::updateHud(uint32_t now, float speedMs, FrameView &view) {
   } else {
     h.warning.clear();
   }
-  h.estimate = source_ == Source::Live && linkStatus_ == LinkStatus::Live ? localizer_.describe(now) : "";
+  h.estimate = linkStatus_ == LinkStatus::Live ? localizer_.describe(now) : "";
 }
 
 // ── Quadro ───────────────────────────────────────────────────────────────
@@ -654,58 +579,23 @@ void App::update(uint32_t now, FrameView &view) {
 
   if (needsReplan()) replan(true, nullptr, now);
 
-  float speedMs = 0;
-  if (source_ == Source::Live) {
-    // Carro real: telemetria + marcos detectados (o ponto só conta quando a serial confirma)
-    const VehicleData *data = linkStatus_ == LinkStatus::Live && hasData_ ? &liveData_ : nullptr;
-    updateAwaitButton(now);
-    // Acompanha a velocidade real: freia e acelera junto (~0,25 s), sem dar saltos.
-    // Travado no ponto o main.py força PWM 0: o mapa para junto, sem esperar a roda zerar.
-    float measured = localizer_.speed(data, pwmToMs_);
-    float target = await_.active ? 0 : measured;
-    liveSpeed_ += (target - liveSpeed_) * (1 - expf(-dt * 8));
-    if (target == 0 && liveSpeed_ < 0.01f) liveSpeed_ = 0;
-    speedMs = liveSpeed_;
-    s_ = localizer_.step(plan_, s_, data, dt, speedMs, METERS_PER_PX, now, pointConfirmed_, !serverRoute_.empty());
-    pointConfirmed_ = false;
-    if (s_ >= plan_.length) {
-      replan(false, &LAP_START, now);
-      localizer_.lapStart(now);
-      // Volta fechada depois do último ponto: percurso finalizado na linha de chegada
-      if (serverRoute_.empty() && !liveDone_.empty()) finishMission();
-    }
-  } else {
-    float speedPx = simSpeedPx(now);
-    speedMs = speedPx * METERS_PER_PX;
-    if (speedPx > 0) {
-      float next = s_ + speedPx * dt;
-      // PARE no caminho deste quadro: para nela (por cruzamento, vale para qualquer velocidade e fps)
-      if (const PlanEvent *stop = nextEvent(EventType::Stop, next - s_ + 8)) {
-        int key = (int)plan_.length * 8192 + (int)stop->s;
-        if (stoppedAtKey_ != key) {
-          stoppedAtKey_ = key;
-          stopHoldUntil_ = now + STOP_HOLD_MS;
-          next = std::max(s_, std::min(next, stop->s - 8));
-        }
-      }
-      s_ = next;
-      int seen = 0;
-      for (const PlanEvent &e : plan_.events) {
-        if (e.type != EventType::Point || !e.target) continue;
-        if (seen++ < planConsumed_) continue;
-        if (s_ < e.s) break;
-        s_ = e.s + 0.5f;   // para na placa, sem passar dela
-        consumePoint(now);
-        break;
-      }
-      if (s_ >= plan_.length) {
-        // Volta completa: missão cumprida para na linha de chegada e fica lá (percurso finalizado);
-        // sem missão, segue em voltas. Missão nova pela serial ({"panel":{"sim_route":...}}) sai dali.
-        bool hadMission = !planQueue_.empty();
-        replan(false, &LAP_START, now);
-        if (hadMission && currentQueue().empty()) finishMission();
-      }
-    }
+  // Carro real: telemetria + marcos detectados (o ponto só conta quando a serial confirma)
+  const VehicleData *data = linkStatus_ == LinkStatus::Live && hasData_ ? &liveData_ : nullptr;
+  updateAwaitButton(now);
+  // Acompanha a velocidade real: freia e acelera junto (~0,25 s), sem dar saltos.
+  // Travado no ponto o main.py força PWM 0: o mapa para junto, sem esperar a roda zerar.
+  float measured = localizer_.speed(data, pwmToMs_);
+  float target = await_.active ? 0 : measured;
+  liveSpeed_ += (target - liveSpeed_) * (1 - expf(-dt * 8));
+  if (target == 0 && liveSpeed_ < 0.01f) liveSpeed_ = 0;
+  const float speedMs = liveSpeed_;
+  s_ = localizer_.step(plan_, s_, data, dt, speedMs, METERS_PER_PX, now, pointConfirmed_, !serverRoute_.empty());
+  pointConfirmed_ = false;
+  if (s_ >= plan_.length) {
+    replan(false, &LAP_START, now);
+    localizer_.lapStart(now);
+    // Volta fechada depois do último ponto: percurso finalizado na linha de chegada
+    if (serverRoute_.empty() && !liveDone_.empty()) finishMission();
   }
 
   Sample p = plan_.line.sample(s_);
@@ -724,15 +614,15 @@ void App::update(uint32_t now, FrameView &view) {
   shownX_ += (p.pos.x - shownX_) * follow;
   shownY_ += (p.pos.y - shownY_) * follow;
   shownReady_ = true;
-  if (source_ == Source::Live && speedMs > 0.05f) cruiseMs_ += (speedMs - cruiseMs_) * std::min(1.0f, dt * 0.5f);
+  if (speedMs > 0.05f) cruiseMs_ += (speedMs - cruiseMs_) * std::min(1.0f, dt * 0.5f);
 
-  view.light = source_ == Source::Live && hasData_ && liveData_.trafficLight >= 0 && liveData_.trafficLight <= 2
+  view.light = hasData_ && liveData_.trafficLight >= 0 && liveData_.trafficLight <= 2
                    ? liveData_.trafficLight : -1;
   updateGps(now, view);
 
   // Pedestre (command.stop) ou obstáculo crítico nos ultrassônicos da frente
   hazard_ = false;
-  if (source_ == Source::Live && linkStatus_ == LinkStatus::Live && hasData_) {
+  if (linkStatus_ == LinkStatus::Live && hasData_) {
     if (liveData_.pedestrian) {
       hazard_ = true;
       hud_.hazardPerson = true;
@@ -744,14 +634,6 @@ void App::update(uint32_t now, FrameView &view) {
   hud_.hazard = hazard_;
 
   updateCamera(dt, shownX_ * PX_TO_WORLD, shownY_ * PX_TO_WORLD, dirX, dirZ, view);
-
-  // Onda de carga (9 s) e fumaça nas bordas (2 s), a partir de onde o carro estava
-  if (chargePending_) startCharge(now);
-  float chargeT = charging_ ? (now - chargeStart_) / 1000.0f : -1;
-  if (chargeT > CHARGE_WAVE_S) charging_ = false, chargeT = -1;
-  view.chargeT = chargeT;
-  view.chargeOrigin = chargeOrigin_;
-  view.smokeT = chargeT >= 0 && chargeT < CHARGE_SMOKE_S ? chargeT : -1;
 
   view.carX = shownX_;
   view.carY = shownY_;
@@ -770,6 +652,8 @@ void App::update(uint32_t now, FrameView &view) {
   }
   updateHud(now, speedMs, view);
   updateCargo(now);
+  updateCharging(now);
+  updateLogo(now);
   view.hud = hud_;
 }
 
@@ -786,7 +670,6 @@ void App::updateCargo(uint32_t now) {
     if (cargoOpen_ <= 0) cargoSince_ = now;
     h.cargoRole = arrivalRole_ == ROLE_DELIVERY ? ROLE_DELIVERY : ROLE_PICKUP;
     h.cargoPoint = arrivalPoint_;
-    h.cargoSim = source_ == Source::Sim;
   } else if (!await_.active) {
     cargoShown_ = false;
   }
@@ -795,4 +678,40 @@ void App::updateCargo(uint32_t now) {
   h.cargo = cargoOpen_ > 0;
   h.cargoOpen = cargoOpen_;
   h.cargoSince = cargoSince_;
+}
+
+/**
+ * Tela da bateria (todo quadro): enquanto o BMS diz "carregando" (battery_state 1) a cena fecha e
+ * fica só a bateria com a porcentagem; abre e fecha como a tela da carga, em CARGO_FADE_MS.
+ */
+void App::updateCharging(uint32_t now) {
+  HudView &h = hud_;
+  uint32_t dt = chargingAt_ ? now - chargingAt_ : 0;
+  chargingAt_ = now;
+  bool show = hasData_ && linkStatus_ == LinkStatus::Live && liveData_.batteryState == BATTERY_CHARGING;
+  if (show && chargingOpen_ <= 0) chargingSince_ = now;
+  float step = (float)dt / CARGO_FADE_MS;
+  chargingOpen_ = show ? std::min(1.0f, chargingOpen_ + step) : std::max(0.0f, chargingOpen_ - step);
+  h.charging = chargingOpen_ > 0;
+  h.chargingOpen = chargingOpen_;
+  h.chargingSince = chargingSince_;
+  if (show) {
+    // Fechando, segura a última leitura (a bateria não "pula" enquanto some)
+    h.chargeLevel = isfinite(liveData_.battery) && liveData_.battery > 0
+                        ? std::min(100.0f, std::max(0.0f, liveData_.battery)) : NAN;
+  }
+}
+
+/**
+ * Tela da logo (todo quadro): sem dados do carro (ligando, sem sinal, servidor sem o main.py ou
+ * dados parados) a cena fecha e fica só a logo do time; volta quando os dados chegam.
+ */
+void App::updateLogo(uint32_t now) {
+  uint32_t dt = logoAt_ ? now - logoAt_ : 0;
+  logoAt_ = now;
+  bool show = !(hasData_ && linkStatus_ == LinkStatus::Live);
+  float step = (float)dt / CARGO_FADE_MS;
+  logoOpen_ = show ? std::min(1.0f, logoOpen_ + step) : std::max(0.0f, logoOpen_ - step);
+  hud_.logo = logoOpen_ > 0;
+  hud_.logoOpen = logoOpen_;
 }

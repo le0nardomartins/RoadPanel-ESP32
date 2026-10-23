@@ -10,6 +10,7 @@
 #include "../generated/font_cargo.h"
 #include "../generated/fonts.h"
 #include "../generated/icons.h"
+#include "Logo.h"
 
 namespace {
 
@@ -100,9 +101,21 @@ inline float easeOut(float t) {
 
 void Hud::draw(Canvas &c, const FrameView &view, uint32_t nowMs) {
   const HudView &h = view.hud;
-  // Tela da carga aberta cobre tudo: nem desenha o HUD por baixo
+  // Sem dados do carro: só a logo (nem o HUD nem as outras telas por baixo)
+  if (h.logo && h.logoOpen >= 1) {
+    logoScreen(c, h, nowMs);
+    return;
+  }
+  // Telas da bateria e da carga abertas cobrem tudo: nem desenha o HUD por baixo.
+  // A da bateria fica por cima (carregando no ponto, a da carga volta quando o carregador sai).
+  if (h.charging && h.chargingOpen >= 1) {
+    charging(c, h, nowMs);
+    return;
+  }
   if (h.cargo && h.cargoOpen >= 1) {
     cargo(c, h, nowMs);
+    if (h.charging) charging(c, h, nowMs);
+    if (h.logo) logoScreen(c, h, nowMs);
     return;
   }
   topBar(c, h);
@@ -111,6 +124,8 @@ void Hud::draw(Canvas &c, const FrameView &view, uint32_t nowMs) {
   if (h.gpsOpacity < 1) metrics(c, h);
   if (h.hazard) hazard(c, h);
   if (h.cargo) cargo(c, h, nowMs);
+  if (h.charging) charging(c, h, nowMs);
+  if (h.logo) logoScreen(c, h, nowMs);
   if (fps >= 0) {
     char buf[12];
     snprintf(buf, sizeof buf, "%d fps", fps);
@@ -131,19 +146,15 @@ void Hud::topBar(Canvas &c, const HudView &h) {
   c.text(fonts::speed, x, 34, h.speed, INK);
   c.text(fonts::label, x + vw + 6, 34, unit, INK2, 255, 2);
 
-  // Origem: Simulação (âmbar, nunca verde) | Ao vivo | Sem sinal...
+  // Origem do dado: Ao vivo | Sem sinal... (sem dados a tela da logo cobre o mapa)
   const char *text;
   Rgb dot, ink;
-  if (h.sim) {
-    text = "Simulação", dot = SIM, ink = SIM;
-  } else {
-    switch (h.link) {
-      case LinkStatus::Live: text = "Ao vivo", dot = LIVE_DOT, ink = LIVE; break;
-      case LinkStatus::Waiting: text = "Aguardando o carro", dot = SIM, ink = INK2; break;
-      case LinkStatus::Stale: text = "Dados parados", dot = SIM, ink = INK2; break;
-      case LinkStatus::Offline: text = "Sem sinal", dot = STOP, ink = STOP; break;
-      default: text = "Conectando…", dot = INK3, ink = INK2;
-    }
+  switch (h.link) {
+    case LinkStatus::Live: text = "Ao vivo", dot = LIVE_DOT, ink = LIVE; break;
+    case LinkStatus::Waiting: text = "Aguardando o carro", dot = SIM, ink = INK2; break;
+    case LinkStatus::Stale: text = "Dados parados", dot = SIM, ink = INK2; break;
+    case LinkStatus::Offline: text = "Sem sinal", dot = STOP, ink = STOP; break;
+    default: text = "Conectando…", dot = INK3, ink = INK2;
   }
   int tw = Canvas::textWidth(fonts::label, text);
   float pw = tw + 30, px = SCREEN_W - GUTTER - pw;
@@ -173,8 +184,8 @@ static int guideHeight(const HudView &h) {
 int Hud::occluders(const FrameView &view, Occluder *out) const {
   const HudView &h = view.hud;
   int n = 0;
-  if (h.cargo && h.cargoOpen >= 1) {
-    out[n++] = {0, 0, SCREEN_W, SCREEN_H, 0};   // tela da carga opaca: a cena inteira fica de fora
+  if ((h.logo && h.logoOpen >= 1) || (h.cargo && h.cargoOpen >= 1) || (h.charging && h.chargingOpen >= 1)) {
+    out[n++] = {0, 0, SCREEN_W, SCREEN_H, 0};   // tela da logo/carga/bateria opaca: a cena inteira fica de fora
     return n;
   }
   out[n++] = {PANEL_X, PANEL_Y, PANEL_W, guideHeight(h), 14};
@@ -224,11 +235,11 @@ int Hud::guidePanel(Canvas &c, const HudView &h, uint32_t nowMs) {
   int y = PANEL_Y + 92;
   c.fillRect(PANEL_X + 12, y, PANEL_W - 24, 1, INK, LINE_ALPHA);
   c.text(fonts::micro, PANEL_X + 12, y + 18, "MISSÃO", INK3, 255, 1);
-  const char *src = h.sim ? "simulação" : "serial";
+  const char *src = "serial";
   c.text(fonts::micro, PANEL_X + PANEL_W - 12 - Canvas::textWidth(fonts::micro, src), y + 18, src, INK3);
   y += 28;
   if (!points) {
-    c.text(fonts::body, PANEL_X + 12, y + 14, h.sim ? "Volta externa" : "Nenhuma missão recebida", INK3);
+    c.text(fonts::body, PANEL_X + 12, y + 14, "Nenhuma missão recebida", INK3);
     y += 22;
   }
   for (int i = 0; i < points; i++) {
@@ -408,6 +419,26 @@ float phase(uint32_t elapsed, float periodMs, float delayMs = 0) {
   return fmodf(e, periodMs) / periodMs;
 }
 int alphaOf(float a) { return (int)(255 * clamp01f(a)); }
+
+/** Céu opaco, malha de pontos mais forte no centro (elipse 60% x 55%) e anéis finos saindo de (cx, cy). */
+void backdrop(Canvas &c, Rgb dots, Rgb rings, float cx, float cy, uint32_t elapsed, float a) {
+  c.fillRect(0, c.bandY, SCREEN_W, BAND_H, SKY, alphaOf(a));
+  const int gap = 16;
+  int gy0 = ((c.bandY - 2) / gap) * gap + gap / 2;
+  for (int y = gy0; y < c.bandY + BAND_H + 2; y += gap) {
+    for (int x = gap / 2; x < SCREEN_W; x += gap) {
+      float nx = (x - CX) / (SCREEN_W * 0.6f), ny = (y - SCREEN_H / 2.0f) / (SCREEN_H * 0.55f);
+      float fall = 1 - clamp01f((sqrtf(nx * nx + ny * ny) - 0.15f) / 0.6f);
+      if (fall > 0) c.circle((float)x, (float)y, 1.1f, dots, alphaOf(0.32f * fall * a));
+    }
+  }
+  // 3,6 s, a cada 1,2 s
+  for (int k = 0; k < 3; k++) {
+    float q = easeOutStrong(phase(elapsed, 3600, k * 1200.0f));
+    float r = 104 * lerp(0.4f, 1.45f, q);
+    c.ellipse(cx, cy, r, r, rings, alphaOf(0.35f * (1 - q) * a), 1);
+  }
+}
 
 // Projeção da caixa: gira em y (órbita de 16 s), inclina 24° para mostrar o topo e põe perspectiva
 struct Projector {
@@ -624,26 +655,9 @@ void Hud::cargo(Canvas &c, const HudView &h, uint32_t nowMs) {
   bool delivery = h.cargoRole == 'E';
   Rgb accent = delivery ? LIVE : ROUTE_STRONG;
 
-  // Céu do painel (opaco quando aberta: no TFT não há desfoque, então a cena some por baixo)
-  c.fillRect(0, c.bandY, SCREEN_W, BAND_H, SKY, alphaOf(a));
-
-  // Malha de pontos azul, mais forte no centro (elipse 60% x 55%, some em 75%)
-  const int gap = 16;
-  int gy0 = ((c.bandY - 2) / gap) * gap + gap / 2;
-  for (int y = gy0; y < c.bandY + BAND_H + 2; y += gap) {
-    for (int x = gap / 2; x < SCREEN_W; x += gap) {
-      float nx = (x - CX) / (SCREEN_W * 0.6f), ny = (y - SCREEN_H / 2.0f) / (SCREEN_H * 0.55f);
-      float fall = 1 - clamp01f((sqrtf(nx * nx + ny * ny) - 0.15f) / 0.6f);
-      if (fall > 0) c.circle((float)x, (float)y, 1.1f, ROUTE_STRONG, alphaOf(0.32f * fall * a));
-    }
-  }
-
-  // Anéis finos saindo do centro (3,6 s, a cada 1,2 s)
-  for (int k = 0; k < 3; k++) {
-    float q = easeOutStrong(phase(elapsed, 3600, k * 1200.0f));
-    float r = 104 * lerp(0.4f, 1.45f, q);
-    c.ellipse(CX, SCREEN_H / 2.0f, r, r, accent, alphaOf(0.35f * (1 - q) * a), 1);
-  }
+  // Céu do painel (opaco quando aberta: no TFT não há desfoque, então a cena some por baixo),
+  // malha de pontos azul e anéis finos saindo do centro
+  backdrop(c, ROUTE_STRONG, accent, CX, SCREEN_H / 2.0f, elapsed, a);
 
   // Palco: caixa 3D, setas e botão
   const float stageY = 104;
@@ -686,13 +700,124 @@ void Hud::cargo(Canvas &c, const HudView &h, uint32_t nowMs) {
   c.circle(sx + lw + dotGap / 2.0f, sy - 5, 5 * dot, KEY, subA);
   c.text(fonts::label, sx + lw + dotGap, sy, right, INK2, subA, track);
 
-  // Simulação: o botão RUN é o BOOT da placa
-  if (h.cargoSim) {
-    const char *hint = "Simulação · aperte o botão BOOT da placa";
-    int hw = Canvas::textWidth(fonts::body, hint) + 28;
-    float hx = CX - hw / 2.0f, hy = 274;
-    c.roundRect(hx, hy, hw, 26, 13, WHITE, subA);
-    c.roundRectStroke(hx, hy, hw, 26, 13, 1, INK, LINE_ALPHA * subA / 255);
-    c.text(fonts::body, (int)hx + 14, (int)hy + 18, hint, INK2, subA);
+}
+
+// ── Tela da bateria (carregando) ─────────────────────────────────────────
+// A cena fecha e fica só a bateria: contorno escuro, nível em verde com um brilho correndo por ele,
+// o próximo trecho piscando (está enchendo), raio no meio e a porcentagem grande embaixo.
+void Hud::charging(Canvas &c, const HudView &h, uint32_t nowMs) {
+  using namespace ct;
+  constexpr Rgb FILL_LIGHT = hex(0x8ff3c2);
+  float a = easePanel(h.chargingOpen);
+  uint32_t elapsed = nowMs - h.chargingSince;
+
+  // Corpo da bateria e o polo à direita
+  const float bw = 212, bh = 96, nubW = 12, nubH = 38, stroke = 4, pad = 6;
+  const float bx = CX - (bw + nubW + 3) / 2.0f, by = 78, bcy = by + bh / 2;
+  backdrop(c, LIVE, CHARGE, CX, bcy, elapsed, a);
+  if (c.bandY + BAND_H >= by - 2 && c.bandY <= by + bh + 8) {
+    c.roundRect(bx, by + 4, bw, bh, 18, INK, alphaOf(0.1f * a));   // sombra
+    c.roundRect(bx + bw + 3, bcy - nubH / 2, nubW, nubH, 5, INK, alphaOf(a));
+    c.roundRect(bx, by, bw, bh, 18, INK, alphaOf(a));
+    c.roundRect(bx + stroke, by + stroke, bw - 2 * stroke, bh - 2 * stroke, 14, WHITE, alphaOf(a));
+
+    // Poço do nível
+    const float wx = bx + stroke + pad, wy = by + stroke + pad;
+    const float ww = bw - 2 * (stroke + pad), wh = bh - 2 * (stroke + pad), wr = 9;
+    float x0 = wx, x1;
+    bool known = isfinite(h.chargeLevel);
+    if (known) {
+      // Enche do zero ao abrir; depois acompanha a leitura
+      float grow = easeOutStrong(clamp01f((elapsed - 120.0f) / 900));
+      x1 = wx + ww * clamp01f(h.chargeLevel / 100) * grow;
+    } else {
+      // Sem leitura: um trecho corre de ponta a ponta
+      float q = easeInOutStrong(phase(elapsed, 1800));
+      float seg = ww * 0.34f;
+      x0 = std::max(wx, wx - seg + (ww + seg) * q);
+      x1 = std::min(wx + ww, wx + (ww + seg) * q);
+    }
+    float fw = x1 - x0;
+    if (fw > 1) {
+      c.roundRect(x0, wy, fw, wh, std::min(wr, fw / 2), CHARGE, alphaOf(a));
+      // Brilho de cima (volume) e o feixe claro correndo pelo nível a cada 1,8 s
+      if (fw > 2 * wr) c.roundRect(x0 + 4, wy + 4, fw - 8, 6, 3, FILL_LIGHT, alphaOf(0.6f * a));
+      float sweep = x0 - 30 + (fw + 60) * easeInOutStrong(phase(elapsed, 1800, 400));
+      for (int x = (int)std::max(x0 + 3, sweep - 18); x < (int)std::min(x1 - 3, sweep + 18); x++) {
+        float d = (x - sweep) / 18.0f;
+        float k = (1 - d * d) * 0.5f;
+        if (k > 0) c.fillRect(x, (int)wy + 3, 1, (int)wh - 6, WHITE, alphaOf(k * a));
+      }
+    }
+    // Próximo trecho do nível piscando: está enchendo
+    if (known && h.chargeLevel < 99.5f && elapsed > 1000) {
+      float next = std::min(wx + ww, x1 + ww * 0.1f);
+      float pulse = 0.5f - 0.5f * cosf(phase(elapsed, 1400) * 2 * (float)M_PI);
+      if (next - x1 > 2)
+        c.roundRect(x1 + 2, wy, next - x1 - 2, wh, std::min(4.0f, (next - x1 - 2) / 2), CHARGE,
+                    alphaOf((0.12f + 0.38f * pulse) * a));
+    }
+
+    // Raio no centro, respirando; contorno branco para ler sobre o verde e sobre o branco
+    float s = 46 * (1 + 0.06f * sinf(phase(elapsed, 1400) * 2 * (float)M_PI));
+    float cx = bx + bw / 2, cy = bcy;
+    const float top[6] = {cx + 0.14f * s, cy - 0.5f * s, cx - 0.27f * s, cy + 0.09f * s, cx + 0.07f * s, cy + 0.09f * s};
+    const float bottom[6] = {cx - 0.14f * s, cy + 0.5f * s, cx + 0.27f * s, cy - 0.09f * s, cx - 0.07f * s, cy - 0.09f * s};
+    for (const float *t : {top, bottom}) {
+      float halo[6];
+      for (int i = 0; i < 6; i += 2) {
+        halo[i] = t[i] + (t[i] - cx) * 0.18f;
+        halo[i + 1] = t[i + 1] + (t[i + 1] - cy) * 0.12f;
+      }
+      c.convex(halo, 3, WHITE, alphaOf(a));
+    }
+    c.convex(top, 3, INK, alphaOf(a));
+    c.convex(bottom, 3, INK, alphaOf(a));
   }
+
+  // Textos: entram subindo 14 px, como na tela da carga
+  float rise1 = easePanel(clamp01f((elapsed - 80.0f) / 300)), rise2 = easePanel(clamp01f((elapsed - 160.0f) / 300));
+  const char *kicker = "CARREGANDO";
+  int kw = Canvas::textWidth(fonts::micro, kicker, 2);
+  float pulse = 0.725f + 0.275f * cosf(phase(elapsed, 1600) * 2 * (float)M_PI);   // bolt-pulse
+  int kx = (int)(CX - (kw + 12) / 2.0f);
+  c.circle(kx + 3.5f, 46, 3.5f, CHARGE, alphaOf(pulse * a));
+  c.text(fonts::micro, kx + 12, 50, kicker, LIVE, alphaOf(a), 2);
+
+  char pct[8];
+  if (isfinite(h.chargeLevel)) snprintf(pct, sizeof pct, "%d%%", (int)roundf(h.chargeLevel));
+  else snprintf(pct, sizeof pct, "--%%");
+  int tw = Canvas::textWidth(fonts::cargo, pct);
+  c.text(fonts::cargo, (int)(CX - tw / 2.0f), 238 + (int)(14 * (1 - rise1)), pct, INK, alphaOf(a * rise1));
+
+  const char *sub = "CARREGADOR CONECTADO";
+  int sw = Canvas::textWidth(fonts::label, sub, 3);
+  int subA = alphaOf(a * rise2);
+  c.text(fonts::label, (int)(CX - sw / 2.0f), 264 + (int)(14 * (1 - rise2)), sub, INK2, subA, 3);
+}
+
+// ── Tela da logo (sem dados do carro) ────────────────────────────────────
+// Só a logo do time no centro do céu claro; embaixo, discreto, o que falta (sem sinal, aguardando).
+void Hud::logoScreen(Canvas &c, const HudView &h, uint32_t nowMs) {
+  using namespace ct;
+  float a = easePanel(h.logoOpen);
+  c.fillRect(0, c.bandY, SCREEN_W, BAND_H, SKY, alphaOf(a));
+  int lx = (SCREEN_W - logo::width()) / 2, ly = (SCREEN_H - logo::height()) / 2 - 18;
+  if (c.bandY + BAND_H > ly && c.bandY < ly + logo::height()) logo::draw(c, lx, ly, INK, alphaOf(a));
+
+  if (c.bandY + BAND_H < 236 || c.bandY > 262) return;
+  const char *text;
+  Rgb dot;
+  switch (h.link) {
+    case LinkStatus::Waiting: text = "Aguardando o carro", dot = SIM; break;
+    case LinkStatus::Stale: text = "Dados parados", dot = SIM; break;
+    case LinkStatus::Offline: text = "Sem sinal do carro", dot = STOP; break;
+    case LinkStatus::Live: text = "Conectado", dot = LIVE_DOT; break;
+    default: text = "Conectando…", dot = INK3;
+  }
+  int tw = Canvas::textWidth(fonts::label, text, 1);
+  int tx = (SCREEN_W - tw + 14) / 2;
+  float pulse = 0.55f + 0.45f * cosf(phase(nowMs, 1600) * 2 * (float)M_PI);
+  c.circle(tx - 10.0f, 250, 3.5f, dot, alphaOf(pulse * a));
+  c.text(fonts::label, tx, 254, text, INK3, alphaOf(a), 1);
 }

@@ -42,9 +42,12 @@ O título usa `src/generated/font_cargo.h` (Saira 700 condensada), gerada por
 Na **simulação** o carro também trava em cada ponto até o botão RUN: quem faz o papel dele é o botão
 **BOOT** da placa (GPIO0, `SIM_RUN_PIN` em `Config.h`) ou a linha `{"panel":{"run":true}}` na serial.
 
-Quando a bateria começa a carregar (`battery_state` 1), a malha de pontos
-solta ondas verdes por 9 s e as bordas da tela ficam com fumaça verde por 2 s
-(`{"panel":{"charge":true}}` simula).
+Quando a bateria começa a carregar (`battery_state` 1), o mapa fecha (mesma transição de 260 ms da tela
+da carga) e o display mostra só a **tela da bateria**: um símbolo de bateria com o nível em verde
+(enche do zero ao abrir, um brilho corre por ele e o próximo trecho pisca), um raio no meio e a
+porcentagem grande (`telemetry.battery`) com "CARREGADOR CONECTADO". Ela fica aberta enquanto carrega
+e fecha quando o `battery_state` sai de 1 (carregada, desligada) ou o link cai. `{"panel":{"charge":true}}`
+abre uma carga de teste por 9 s (sem leitura: "--%" e o nível correndo de ponta a ponta).
 
 ## Dados do carro (serial, 115200)
 
@@ -78,8 +81,12 @@ Para forçar um modo, mande pela mesma serial `{"panel":{"source":"serial"}}` (r
 
 Outros comandos opcionais:
 `{"panel":{"plan":"car"}}` (trajetória pela tabela do carro em vez do caminho livre) e
-`{"panel":{"sim_route":"B → A"}}` (missão da simulação: coleta em B, entrega em A; sai de onde o
-carro está).
+`{"panel":{"sim_route":"B → A"}}` (missão da simulação: coleta em B, entrega em A; o carro volta
+para a partida).
+
+Alterar os pontos de interesse (Resetar Rota, adicionar um ponto ou trocar a lista no painel de controle)
+recomeça a missão: os pontos antigos somem da tela e o carro volta para a partida. Só a saída do
+primeiro ponto da lista, com o carro chegando nele, conta como ponto confirmado.
 
 Quando chega o primeiro dado válido, o painel sai da simulação e entra em **Ao vivo**, igual ao JS.
 Sem dados por 3 s, ele mostra "Sem sinal"; com o `_ts` parado, "Dados parados".

@@ -15,7 +15,8 @@ cl /nologo /LD /std:c++17 /O2 /EHsc /utf-8 /bigobj /W1 /D_USE_MATH_DEFINES /FI"%
   /Fo"%~dp0build\\" /Fe"%DLL%" ^
   "%~dp0sim_main.cpp" ^
   "%ROOT%\src\app\App.cpp" ^
-  "%ROOT%\src\render\Canvas.cpp" "%ROOT%\src\render\Hud.cpp" "%ROOT%\src\render\Scene.cpp" ^
+  "%ROOT%\src\render\Canvas.cpp" "%ROOT%\src\render\Hud.cpp" "%ROOT%\src\render\Logo.cpp" ^
+  "%ROOT%\src\render\Scene.cpp" ^
   "%ROOT%\src\track\Geometry.cpp" "%ROOT%\src\track\Localizer.cpp" "%ROOT%\src\track\Network.cpp" ^
   "%ROOT%\src\track\Planner.cpp" >"%~dp0build\cl.log" || (type "%~dp0build\cl.log" & exit /b 1)
 python "%~dp0run.py" "%DLL%" "%~dp0out"
