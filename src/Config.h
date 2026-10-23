@@ -9,7 +9,7 @@
 //   0.25 = um quarto                      (2 m/s no carro -> 0,5 m/s no mapa)
 // Para calibrar: cronometre uma volta do carro real e compare com a volta no mapa; se o carrinho
 // chega antes, diminua o valor na mesma proporção (ex.: chegou na metade do tempo -> divida por 2).
-#define SPEED_SCALE 1.0f
+#define SPEED_SCALE 0.35f
 
 // ── Display ST7796S (SPI) ──
 #define TFT_SCLK 18
